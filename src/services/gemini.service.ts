@@ -1,9 +1,98 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { StructuredResume } from '../types/structuredResume.types';
+import { ResumeAnalysis } from '../types/ResumeAnalysis';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY!,
+});
 
 export class GeminiService {
+
+  async analyzeResume(resumeContent: string): Promise<ResumeAnalysis> {
+
+    const prompt = `
+You are an ATS (Applicant Tracking System) resume analyzer used by recruiters.
+
+Analyze the resume content and return a structured evaluation.
+
+Evaluation Criteria:
+- ATS keyword compatibility
+- grammar and writing clarity
+- formatting suitability for ATS parsing
+- strength of experience descriptions
+- measurable achievements
+- relevance of skills
+
+Scoring Rules:
+- Score must be between 0 and 100.
+- Grade mapping:
+  90-100 = A
+  80-89 = B
+  70-79 = C
+  60-69 = D
+  <60 = F
+
+Grammar issues must include:
+- original problematic text
+- corrected suggestion
+- sentence context
+
+IMPORTANT OUTPUT RULES:
+- Return ONLY valid JSON.
+- Do NOT include explanations.
+- Do NOT include markdown.
+- Do NOT include code blocks.
+- Do NOT include comments.
+- Do NOT include text before or after the JSON.
+- The response MUST start with { and end with }.
+- The JSON must strictly follow the schema below.
+
+Schema:
+
+{
+  "overallScore": number,
+  "atsScore": number,
+  "formattingScore": number,
+  "keywordScore": number,
+  "impactScore": number,
+  "grade": "A" | "B" | "C" | "D" | "F",
+  "strengths": string[],
+  "weaknesses": string[],
+  "grammarIssues": [
+    {
+      "original": string,
+      "suggestion": string,
+      "context": string
+    }
+  ],
+  "keywordSuggestions": string[],
+  "formattingTips": string[],
+  "overallFeedback": string
+}
+
+Resume Content:
+${resumeContent}
+`
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+
+    const text = response.text ?? "";
+    let parsed: ResumeAnalysis;
+    try {
+      const jsonStart = text.indexOf("{");
+      const jsonEnd = text.lastIndexOf("}");
+      const cleanJson = text.slice(jsonStart, jsonEnd + 1);
+      parsed = JSON.parse(cleanJson);
+    } catch (error) {
+      throw new Error("Failed to parse ATS analysis response");
+    }
+
+    return parsed;
+  }
 
   // Parse resume text → structured JSON via Gemini
   async parseResume(rawText: string): Promise<StructuredResume> {

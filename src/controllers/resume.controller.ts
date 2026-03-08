@@ -7,12 +7,28 @@ import { ApiResponse } from '../utils/ApiResponse';
 import fs from 'fs/promises';
 import { ApiError } from '../utils/ApiError';
 import { HttpStatus } from '../utils/HttpStatus';
+import { ResumeAnalysis } from '../types/ResumeAnalysis';
+import { log } from '../utils/log';
 
 const resumeService = new ResumeService();
 const geminiService = new GeminiService();
 const docxService = new DocxService();
 
 export class ResumeController {
+  
+  async resumeAnalysis(req: Request, res: Response): Promise<void> {
+    
+    if(!req.body.resumeContent) {
+      throw new ApiError(HttpStatus.NOT_FOUND, "No resume content provided for analysis.");
+    }
+
+    log("Stage 1 passed");
+
+    const analysis = await geminiService.analyzeResume(req.body.resumeContent);
+    log("final Stage passed");
+    
+    res.status(200).json(new ApiResponse<ResumeAnalysis>(true, analysis, 'Resume analysis completed successfully.'));   
+  }
   
   // Upload single resume
   async uploadResume(req: Request, res: Response): Promise<void> {

@@ -5,8 +5,9 @@ import { uploadSingle, uploadMemory } from '../middleware/upload';
 const resumeRouter = Router();
 const resumeController = new ResumeController();
 
-resumeRouter.post('/upload', uploadSingle, resumeController.uploadResume.bind(resumeController));
+resumeRouter.post('/metadata', uploadSingle, resumeController.uploadResume.bind(resumeController));
 resumeRouter.post('/generate', uploadMemory, resumeController.generateResume.bind(resumeController));
 resumeRouter.post('/apply-suggestions', uploadMemory, resumeController.applySuggestions.bind(resumeController));
+resumeRouter.post("/analysis", resumeController.resumeAnalysis.bind(resumeController));
 
 export { resumeRouter };
