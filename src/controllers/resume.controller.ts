@@ -1,106 +1,199 @@
-import { Request, Response } from 'express';
-import { ResumeService } from '../services/resume.service';
-import { GeminiService } from '../services/gemini.service';
-import { DocxService } from '../services/docx.service';
-import { ResumeMetadata, ResumeProcessOptions } from '../types/resume.types';
-import { ApiResponse } from '../utils/ApiResponse';
-import fs from 'fs/promises';
-import { ApiError } from '../utils/ApiError';
-import { HttpStatus } from '../utils/HttpStatus';
-import { ResumeAnalysis } from '../types/ResumeAnalysis';
-import { log } from '../utils/log';
+import { Request, Response } from "express";
+import { ResumeService } from "../services/resume.service";
+import { GeminiService } from "../services/gemini.service";
+import { DocxService } from "../services/docx.service";
+import { ResumeMetadata, ResumeProcessOptions } from "../types/resume.types";
+import { ApiResponse } from "../utils/ApiResponse";
+import fs from "fs/promises";
+import { ApiError } from "../utils/ApiError";
+import { HttpStatus } from "../utils/HttpStatus";
+import { ResumeAnalysis, ResumePolishContext } from "../types/ResumeAnalysis";
+import { StructuredResume } from "../types/structuredResume.types";
+import { SummaryAndBufferResponse } from "../types/Responses";
+import { get } from "https";
+import { buffer } from "stream/consumers";
 
-const resumeService = new ResumeService();
-const geminiService = new GeminiService();
-const docxService = new DocxService();
+const resumeService = ResumeService.getInstance();
+const geminiService = GeminiService.getInstance();
+const docxService = DocxService.getInstance();
 
 export class ResumeController {
-  
-  async resumeAnalysis(req: Request, res: Response): Promise<void> {
-    
-    if(!req.body.resumeContent) {
-      throw new ApiError(HttpStatus.NOT_FOUND, "No resume content provided for analysis.");
-    }
 
-    log("Stage 1 passed");
+	private static instance: ResumeController;
 
-    const analysis = await geminiService.analyzeResume(req.body.resumeContent);
-    log("final Stage passed");
-    
-    res.status(200).json(new ApiResponse<ResumeAnalysis>(true, analysis, 'Resume analysis completed successfully.'));   
-  }
-  
-  // Upload single resume
-  async uploadResume(req: Request, res: Response): Promise<void> {
-      if (!req.file) {
-        throw new ApiError(HttpStatus.NOT_FOUND, "No resume file uploaded");
-      }
+	public static getInstance(): ResumeController {
+		if (!ResumeController.instance) {
+			ResumeController.instance = new ResumeController();
+		}
+		return ResumeController.instance;
+	}
 
-      const file = req.file;
-      const options: ResumeProcessOptions = req.body.options ? JSON.parse(req.body.options) : {};
+	async resumeAnalysis(req: Request, res: Response): Promise<void> {
+		if (!req.body.resumeContent) {
+			throw new ApiError(HttpStatus.NOT_FOUND, "No resume content provided for analysis.");
+		}
 
-      const isValid = await resumeService.validateResume(file.path);
+		const analysis = await geminiService.analyzeResume(req.body.resumeContent);
+		res.status(200).json(
+			new ApiResponse<ResumeAnalysis>(
+				true,
+				analysis,
+				"Resume analysis completed successfully."
+			)
+		);
+	}
 
-      if (!isValid) {
-        await fs.unlink(file.path);
-        throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid resume file");
-      }
-      
-      const resumeMetadata = await resumeService.processResume(file.path, options);
+	// Upload single resume
+	async uploadResume(req: Request, res: Response): Promise<void> {
+		if (!req.file) {
+			throw new ApiError(HttpStatus.NOT_FOUND, "No resume file uploaded");
+		}
 
-      const metadata: Partial<ResumeMetadata> = {
-        filename: file.filename,
-        originalName: file.originalname,
-        size: file.size,
-        path: file.path,
-        uploadedAt: new Date(),
-        ...resumeMetadata
-      };
+		const file = req.file;
+		const options: ResumeProcessOptions = req.body.options ? JSON.parse(req.body.options) : {};
+		const isValid = await resumeService.validateResume(file.path);
 
-      if (req.file) {
-        await fs.unlink(req.file.path).catch((err) => { throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, "Could not delete uploaded file") });
-      }
-      
-      res.status(200).json(new ApiResponse<Partial<ResumeMetadata>>(true, metadata, 'Successfully extracted resume content.'));
-  }
+		if (!isValid) {
+			await fs.unlink(file.path);
+			throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid resume file");
+		}
 
-  // POST /resume/generate — Reformat into styled template
-  async generateResume(req: Request, res: Response): Promise<void> {
-    if (!req.file) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'No file uploaded');
-    }
+		const resumeMetadata = await resumeService.processResume(file.path, options);
 
-    const { buffer, mimetype } = req.file;
-    const rawText = await resumeService.extractTextFromBuffer(buffer, mimetype);
-    const structuredData = await geminiService.parseResume(rawText);
-    const docxBuffer = await docxService.buildDocx(structuredData);
+		const metadata: Partial<ResumeMetadata> = {
+			filename: file.filename,
+			originalName: file.originalname,
+			size: file.size,
+			path: file.path,
+			uploadedAt: new Date(),
+			...resumeMetadata,
+		};
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', 'attachment; filename="resume_formatted.docx"');
-    res.send(docxBuffer);
-  }
+		if (req.file) {
+			await fs.unlink(req.file.path).catch((err) => {
+				throw new ApiError(
+					HttpStatus.INTERNAL_SERVER_ERROR,
+					"Could not delete uploaded file"
+				);
+			});
+		}
 
-  // POST /resume/apply-suggestions — Keep original template, inject improved content
-  async applySuggestions(req: Request, res: Response): Promise<void> {
-    if (!req.file) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'No file uploaded');
-    }
-    if (!req.body.suggestions) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'No suggestions provided');
-    }
+		res.status(200).json(
+			new ApiResponse<Partial<ResumeMetadata>>(
+				true,
+				metadata,
+				"Successfully extracted resume content."
+			)
+		);
+	}
 
-    const improvedContent = JSON.parse(req.body.suggestions);
-    let { buffer, mimetype } = req.file;
+	// POST /resume/generate — Reformat into styled template
+	async generateResume(req: Request, res: Response): Promise<void> {
 
-    // If PDF, convert to DOCX first so we have editable XML
-    if (mimetype === 'application/pdf') {
-      buffer = resumeService.pdfToDocxBuffer(buffer);
-    }
+		// Get raw text from frontend
 
-    const outputBuffer = await docxService.injectContent(buffer, improvedContent);
+		const { resumeContent, analysis } = req.body;
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', 'attachment; filename="resume_improved.docx"');
-    res.send(outputBuffer);
-  }
+		if (!resumeContent || typeof resumeContent !== "string") {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "No resume content provided");
+		}
+		const parsedAnalysis = analysis ? JSON.parse(analysis) : null;
+		if (!parsedAnalysis) {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "No valid analysis provided");
+		}
+
+		const polishContext = geminiService.extractApprovedSuggestions(parsedAnalysis);
+		const { polishSummary, ...structuredData } = await geminiService.generateImprovedContent(resumeContent, polishContext);
+		const docxBuffer = await docxService.buildDocx(structuredData);
+
+		res.setHeader(
+			"Content-Type",
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		);
+		res.setHeader("Content-Disposition", 'attachment; filename="resume_formatted.docx"');
+
+		const data: SummaryAndBufferResponse = {
+			polishSummary,
+			buffer: docxBuffer,
+		};
+
+		console.log("Generated resume buffer size:", docxBuffer.length);
+
+		res.status(200).send(
+			new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume generated successfully.")
+		);
+	}
+
+	async generateFixedResume(req: Request, res: Response): Promise<void> {
+		if (!req.file) {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "No file uploaded");
+		}
+
+		const { buffer, mimetype } = req.file;
+		const rawText = await resumeService.extractTextFromBuffer(buffer, mimetype);
+		const analysis = await geminiService.analyzeResume(rawText);
+		const polishContext = geminiService.extractApprovedSuggestions(analysis);
+		const { polishSummary, ...structuredData } = await geminiService.generateImprovedContent(
+			rawText,
+			polishContext
+		);
+		const docxBuffer = await docxService.buildDocx(structuredData);
+
+		res.setHeader(
+			"Content-Type",
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		);
+		res.setHeader("Content-Disposition", 'attachment; filename="resume_formatted.docx"');
+
+		const data: SummaryAndBufferResponse = {
+			polishSummary,
+			buffer: docxBuffer,
+		};
+
+		res.status(200).send(
+			new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume generated successfully.")
+		);
+	}
+
+	// POST /resume/apply-suggestions — Keep original template, inject improved content
+	async applySuggestions(req: Request, res: Response): Promise<void> {
+		if (!req.file) {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "No file uploaded");
+		}
+		if (!req.body.suggestions) {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "No suggestions provided");
+		}
+
+		const suggestions: ResumePolishContext = JSON.parse(req.body.suggestions);
+		const { polishSummary, ...improvedContent } = await geminiService.generateImprovedContent(
+			req.body.resumeContent,
+			suggestions
+		);
+		let { buffer, mimetype } = req.file;
+
+		// If PDF, convert to DOCX first so we have editable XML
+		if (mimetype === "application/pdf") {
+			buffer = resumeService.pdfToDocxBuffer(buffer);
+		}
+
+		const outputBuffer = await docxService.injectContent<Partial<StructuredResume>>(
+			buffer,
+			improvedContent
+		);
+
+		res.setHeader(
+			"Content-Type",
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		);
+		res.setHeader("Content-Disposition", 'attachment; filename="resume_improved.docx"');
+
+		const data: SummaryAndBufferResponse = {
+			polishSummary,
+			buffer: outputBuffer,
+		};
+
+		res.status(200).send(
+			new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume improved successfully.")
+		);
+	}
 }

@@ -14,41 +14,50 @@ import { HttpStatus } from '../utils/HttpStatus';
 const wordExtractor = new WordExtractor();
 
 export class ResumeService {
-  
+
+  private static instance: ResumeService;
+
+  public static getInstance(): ResumeService {
+    if (!ResumeService.instance) {
+      ResumeService.instance = new ResumeService();
+    }
+    return ResumeService.instance;
+  }
+
   // Validate and extract resume info
   async processResume(filePath: string, options: ResumeProcessOptions = {}): Promise<Partial<ResumeMetadata>> {
-      const ext = path.extname(filePath).toLowerCase();
-      const dataBuffer = await fs.readFile(filePath);
-      let metadata: Partial<ResumeMetadata> = {};
-      let text = '';
+    const ext = path.extname(filePath).toLowerCase();
+    const dataBuffer = await fs.readFile(filePath);
+    let metadata: Partial<ResumeMetadata> = {};
+    let text = '';
 
-      if (ext === '.pdf') {
-        const parser = new PDFParse({ data: dataBuffer });
-        const info = await parser.getInfo();
-        const textResult = await parser.getText();
-        await parser.destroy();
-        metadata = {
-          pages: info.total,
-          author: info.info?.Author,
-          title: info.info?.Title,
-        };
-        text = textResult.text;
-      } else if (ext === '.docx') {
-        const result = await mammoth.extractRawText({ buffer: dataBuffer });
-        text = result.value;
-      } else if (ext === '.doc') {
-        const doc = await wordExtractor.extract(filePath);
-        text = doc.getBody();
-      }
+    if (ext === '.pdf') {
+      const parser = new PDFParse({ data: dataBuffer });
+      const info = await parser.getInfo();
+      const textResult = await parser.getText();
+      await parser.destroy();
+      metadata = {
+        pages: info.total,
+        author: info.info?.Author,
+        title: info.info?.Title,
+      };
+      text = textResult.text;
+    } else if (ext === '.docx') {
+      const result = await mammoth.extractRawText({ buffer: dataBuffer });
+      text = result.value;
+    } else if (ext === '.doc') {
+      const doc = await wordExtractor.extract(filePath);
+      text = doc.getBody();
+    }
 
-      if (!text) {
-        throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, "Could not read uploaded file");
-      }
+    if (!text) {
+      throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, "Could not read uploaded file");
+    }
 
-      metadata.content = text;
-      return metadata;
+    metadata.content = text;
+    return metadata;
   }
-  
+
   // Validate resume structure and integrity
   async validateResume(filePath: string): Promise<boolean> {
     try {
@@ -73,7 +82,7 @@ export class ResumeService {
       return false;
     }
   }
-  
+
   // Get resume metadata
   async getMetadata(filePath: string): Promise<object> {
     const ext = path.extname(filePath).toLowerCase();

@@ -38,3 +38,6 @@ export const uploadMemory = multer({
     fileFilter,
     limits: { fileSize: 10 * 1024 * 1024 }
 }).single('resume');
+
+// Parsing form-data when there is not file.
+export const uploadNone = multer().none();
