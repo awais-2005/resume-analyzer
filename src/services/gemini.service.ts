@@ -11,7 +11,7 @@ const ai = new GoogleGenAI({
 
 export class GeminiService {
 
-  private model: string = "gemma-3-27b-it"; // Default model, can be overridden in constructor
+  private model: string = "gemini-3.1-flash-lite-preview"; // Default model, can be overridden in constructor
 
   private static instance: GeminiService;
 
@@ -78,12 +78,12 @@ Required format:
       missedOpportunities: analysis.missedOpportunities,
       candidatePersona: analysis.candidatePersona,
 
-      grammarIssues: analysis.grammarIssues.filter(i => i.apply),
-      impactUpgrades: analysis.impactUpgrades.filter(i => i.apply),
-      creativityBoosts: analysis.creativityBoosts.filter(i => i.apply),
-      keywordSuggestions: analysis.keywordSuggestions.filter(i => i.apply),
-      formattingTips: analysis.formattingTips.filter(i => i.apply),
-      redFlags: analysis.redFlags.filter(i => i.apply),
+      grammarIssues: analysis.grammarIssues?.filter(i => i.apply),
+      impactUpgrades: analysis.impactUpgrades?.filter(i => i.apply),
+      creativityBoosts: analysis.creativityBoosts?.filter(i => i.apply),
+      keywordSuggestions: analysis.keywordSuggestions?.filter(i => i.apply),
+      formattingTips: analysis.formattingTips?.filter(i => i.apply),
+      redFlags: analysis.redFlags?.filter(i => i.apply),
     };
   }
 
