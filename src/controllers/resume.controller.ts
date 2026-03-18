@@ -1,20 +1,17 @@
 import { Request, Response } from "express";
 import { ResumeService } from "../services/resume.service";
 import { GeminiService } from "../services/gemini.service";
-import { DocxService } from "../services/docx.service";
 import { ResumeMetadata, ResumeProcessOptions } from "../types/resume.types";
 import { ApiResponse } from "../utils/ApiResponse";
 import fs from "fs/promises";
 import { ApiError } from "../utils/ApiError";
 import { HttpStatus } from "../utils/HttpStatus";
 import { ResumeAnalysis, ResumePolishContext } from "../types/ResumeAnalysis";
-import { StructuredResume } from "../types/structuredResume.types";
 import { SummaryAndBufferResponse } from "../types/Responses";
 import { PdfService } from "../services/pdf.service";
 
 const resumeService = ResumeService.getInstance();
 const geminiService = GeminiService.getInstance();
-const docxService = DocxService.getInstance();
 const pdfService = PdfService.getInstance();
 export class ResumeController {
 
