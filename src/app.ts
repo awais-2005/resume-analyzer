@@ -13,7 +13,7 @@ app.use(cors({ origin: "*" }));
 // For parsing all req bodies into object
 app.use(express.json());
 
-app.use(rateLimiter);
+// app.use(rateLimiter);
 app.use(requestLogger);
 
 app.use("/test", testRouter);

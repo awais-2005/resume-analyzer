@@ -113,18 +113,4 @@ export class ResumeService {
     const { value } = await mammoth.extractRawText({ buffer });
     return value;
   }
-
-  // Convert PDF buffer → DOCX buffer via LibreOffice
-  pdfToDocxBuffer(pdfBuffer: Buffer): Buffer {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'resume-'));
-    try {
-      const pdfPath = join(tmpDir, 'input.pdf');
-      writeFileSync(pdfPath, pdfBuffer);
-      execSync(`soffice --headless --convert-to docx --outdir "${tmpDir}" "${pdfPath}"`);
-      const docxPath = join(tmpDir, 'input.docx');
-      return readFileSync(docxPath);
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
-  }
 }

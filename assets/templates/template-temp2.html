@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>{{name}} - Resume</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;600;700&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--orange:#f57c00;--orange2:#e65100;--blue:#1a3a6b;--purple:#5c35a0;--white:#fff;--dark:#111;--mid:#444;--rule:#c5cfe8;--sw:216px}
+  body{font-family:'Barlow',sans-serif;font-size:12px;background:#fff;color:var(--dark);line-height:1.5}
+  .page{width:794px;min-height:1123px;display:flex;margin:0 auto}
+
+  /* SIDEBAR */
+  .sidebar{width:var(--sw);min-width:var(--sw);background:var(--orange);display:flex;flex-direction:column}
+
+  .initials-wrap{display:flex;justify-content:center;padding:22px 0 0}
+  .initials-box{width:90px;height:90px;border:3px solid var(--white);display:flex;align-items:center;justify-content:center}
+  .initials-text{font-family:'Barlow Condensed',sans-serif;font-size:32px;font-weight:800;color:var(--white);letter-spacing:3px}
+
+  .sb-name-block{padding:12px 16px 10px}
+  .sb-name{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800;color:var(--white);text-transform:uppercase;line-height:1.1;margin-bottom:3px}
+  .sb-headline{font-size:11px;color:rgba(255,255,255,.85)}
+
+  .sb-divider{border:none;border-top:1px solid rgba(255,255,255,.3);margin:0 16px 12px}
+
+  .sb-sec{padding:0 16px 14px}
+  .sb-stitle{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;color:var(--white);text-transform:uppercase;letter-spacing:.1em;margin-bottom:9px;border-bottom:1px solid rgba(255,255,255,.3);padding-bottom:3px}
+
+  .sb-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;color:var(--white);font-size:10.5px;line-height:1.4}
+  .sb-row:last-child{margin-bottom:0}
+  .sb-icon{width:24px;height:24px;border-radius:3px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .sb-icon i{font-size:9px;color:var(--white)}
+
+  /* Skills text */
+  .sb-skill{margin-bottom:8px}
+  .sb-skill-cat{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.95);margin-bottom:2px}
+  .sb-skill-items{font-size:10px;color:rgba(255,255,255,.75);line-height:1.4}
+
+  /* Languages */
+  .sb-lang{display:flex;align-items:center;gap:7px;margin-bottom:6px;font-size:10.5px;color:var(--white)}
+  .sb-lang i{font-size:9px}
+
+  /* MAIN */
+  .main{flex:1;display:flex;flex-direction:column}
+
+  .main-header{background:var(--orange);padding:22px 26px 18px;border-bottom:3px solid var(--orange2)}
+  .main-name{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;color:var(--white);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+  .main-headline{font-size:12px;color:rgba(255,255,255,.9);margin-bottom:8px}
+  .main-summary{font-size:11.5px;color:rgba(255,255,255,.9);line-height:1.6}
+
+  .main-body{flex:1;padding:16px 26px 32px;background:#fff}
+  .section{margin-bottom:15px}
+  .stitle{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--blue);text-transform:uppercase;letter-spacing:.12em;text-align:right;margin-bottom:4px}
+  .srule{border:none;border-top:1.5px solid var(--rule);margin-bottom:10px}
+
+  /* Two-col timeline */
+  .tl-entry{display:flex;gap:10px;margin-bottom:12px;align-items:flex-start}
+  .tl-entry:last-child{margin-bottom:0}
+  .tl-date{width:86px;min-width:86px;font-size:10.5px;color:var(--mid);line-height:1.4;padding-top:2px}
+  .tl-dot-col{display:flex;flex-direction:column;align-items:center;padding-top:4px}
+  .tl-dot{width:9px;height:9px;border-radius:50%;background:var(--purple);flex-shrink:0}
+  .tl-line{flex:1;width:2px;background:var(--rule);margin-top:2px;min-height:16px}
+  .tl-content{flex:1}
+  .tl-org{font-size:11.5px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.03em;margin-bottom:1px}
+  .tl-role{font-size:11px;color:var(--mid);margin-bottom:3px}
+  .tl-body{font-size:11.5px;color:var(--mid);line-height:1.5;margin-bottom:2px}
+  .achievement{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--blue);font-style:italic;margin-top:2px}
+
+  /* Skills main */
+  .skills-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;margin-top:4px}
+  .skill-row{font-size:11.5px;color:var(--mid)}
+  .skill-row strong{color:var(--dark)}
+
+  /* Certs */
+  .cert-entry{display:flex;gap:10px;margin-bottom:8px;align-items:center}
+  .cert-dot{width:9px;height:9px;border-radius:50%;background:var(--purple);flex-shrink:0}
+  .cert-name{font-size:11.5px;color:var(--mid)}
+
+  /* Projects */
+  .proj-entry{margin-bottom:10px}
+  .proj-header{display:flex;justify-content:space-between;align-items:baseline}
+  .proj-name{font-size:12px;font-weight:700;color:var(--dark)}
+  .proj-link{font-size:10.5px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:3px}
+  .proj-link i{font-size:9px}
+  .proj-tech{font-size:10.5px;color:#777;font-style:italic;margin-bottom:2px}
+  .proj-desc{font-size:11.5px;color:var(--mid);margin-bottom:2px}
+  .proj-bullets{padding-left:14px}
+  .proj-bullets li{font-size:11.5px;color:var(--mid);margin-bottom:2px;line-height:1.45}
+  .proj-impact{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--purple);margin-top:2px;font-style:italic}
+
+  /* Languages main */
+  .lang-tags{display:flex;flex-wrap:wrap;gap:5px 14px;margin-top:4px}
+  .lang-tag{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--mid)}
+  .lang-tag i{font-size:9px;color:var(--purple)}
+
+  /* Additional */
+  .add-header{display:flex;justify-content:space-between;font-size:12px}
+  .add-label{color:var(--dark);font-weight:600}
+  .add-date{color:var(--mid);font-size:11px}
+  .add-desc{font-size:11.5px;color:var(--mid);margin-top:1px;margin-bottom:6px}
+
+  @media print{body{background:#fff}.page{margin:0}}
+</style>
+</head>
+<body><div class="page">
+
+  <div class="sidebar">
+    <div class="initials-wrap">
+      <div class="initials-box">
+        <div class="initials-text">{{#if name}}{{name}}{{/if}}</div>
+      </div>
+    </div>
+    <div class="sb-name-block">
+      <div class="sb-name">{{name}}</div>
+      {{#if headline}}<div class="sb-headline">{{headline}}</div>{{/if}}
+    </div>
+    <hr class="sb-divider"/>
+    <div class="sb-sec">
+      <div class="sb-stitle">Contact</div>
+      {{#if phone}}<div class="sb-row"><div class="sb-icon"><i class="fa-solid fa-phone"></i></div><span>{{phone}}</span></div>{{/if}}
+      {{#if email}}<div class="sb-row"><div class="sb-icon"><i class="fa-solid fa-envelope"></i></div><span>{{email}}</span></div>{{/if}}
+      {{#if location}}<div class="sb-row"><div class="sb-icon"><i class="fa-solid fa-location-dot"></i></div><span>{{location}}</span></div>{{/if}}
+      {{#if linkedin}}<div class="sb-row"><div class="sb-icon"><i class="fa-brands fa-linkedin"></i></div><span>{{linkedin}}</span></div>{{/if}}
+      {{#if github}}<div class="sb-row"><div class="sb-icon"><i class="fa-brands fa-github"></i></div><span>{{github}}</span></div>{{/if}}
+      {{#if website}}<div class="sb-row"><div class="sb-icon"><i class="fa-solid fa-globe"></i></div><span>{{website}}</span></div>{{/if}}
+    </div>
+    {{#if skills.length}}<hr class="sb-divider"/><div class="sb-sec">
+      <div class="sb-stitle">Skills</div>
+      {{#each skills}}<div class="sb-skill"><div class="sb-skill-cat">{{category}}</div><div class="sb-skill-items">{{items}}</div></div>{{/each}}
+    </div>{{/if}}
+    {{#if languages.length}}<hr class="sb-divider"/><div class="sb-sec">
+      <div class="sb-stitle">Languages</div>
+      {{#each languages}}<div class="sb-lang"><i class="fa-solid fa-language"></i>{{this}}</div>{{/each}}
+    </div>{{/if}}
+    {{#each additionalSections}}<hr class="sb-divider"/><div class="sb-sec">
+      <div class="sb-stitle">{{title}}</div>
+      {{#each entries}}<div class="sb-skill"><div class="sb-skill-cat">{{label}}</div>{{#if description}}<div class="sb-skill-items">{{description}}</div>{{/if}}</div>{{/each}}
+    </div>{{/each}}
+  </div>
+
+  <div class="main">
+    <div class="main-header">
+      <div class="main-name">{{name}}</div>
+      {{#if headline}}<div class="main-headline">{{headline}}</div>{{/if}}
+      {{#if summary}}<div class="main-summary">{{summary}}</div>{{/if}}
+    </div>
+    <div class="main-body">
+
+      {{#if experience.length}}<div class="section"><div class="stitle">Experience</div><hr class="srule"/>
+        {{#each experience}}<div class="tl-entry">
+          <div class="tl-date">{{dates}}</div>
+          <div class="tl-dot-col"><div class="tl-dot"></div><div class="tl-line"></div></div>
+          <div class="tl-content">
+            <div class="tl-org">{{company}}{{#if location}} — {{location}}{{/if}}</div>
+            {{#if title}}<div class="tl-role">{{title}}</div>{{/if}}
+            {{#each bullets}}<div class="tl-body">{{this}}</div>{{/each}}
+            {{#if keyAchievement}}<div class="achievement"><i class="fa-solid fa-star"></i>{{keyAchievement}}</div>{{/if}}
+          </div>
+        </div>{{/each}}
+      </div>{{/if}}
+
+      {{#if education.length}}<div class="section"><div class="stitle">Education</div><hr class="srule"/>
+        {{#each education}}<div class="tl-entry">
+          <div class="tl-date">{{dates}}</div>
+          <div class="tl-dot-col"><div class="tl-dot"></div><div class="tl-line"></div></div>
+          <div class="tl-content">
+            <div class="tl-org">{{degree}}</div>
+            <div class="tl-role">{{school}}</div>
+            {{#if details}}<div class="tl-body">({{details}})</div>{{/if}}
+            {{#each highlights}}<div class="tl-body">{{this}}</div>{{/each}}
+          </div>
+        </div>{{/each}}
+      </div>{{/if}}
+
+      {{#if skills.length}}<div class="section"><div class="stitle">Skills</div><hr class="srule"/>
+        <div class="skills-grid">{{#each skills}}<div class="skill-row"><strong>{{category}}:</strong> {{items}}</div>{{/each}}</div>
+      </div>{{/if}}
+
+      {{#if certifications.length}}<div class="section"><div class="stitle">Certificate</div><hr class="srule"/>
+        {{#each certifications}}<div class="cert-entry"><div class="tl-dot-col" style="padding-top:2px"><div class="tl-dot"></div></div><div class="cert-name">{{this}}</div></div>{{/each}}
+      </div>{{/if}}
+
+      {{#if projects.length}}<div class="section"><div class="stitle">Projects</div><hr class="srule"/>
+        {{#each projects}}<div class="tl-entry">
+          <div class="tl-date">{{dates}}</div>
+          <div class="tl-dot-col"><div class="tl-dot"></div><div class="tl-line"></div></div>
+          <div class="tl-content">
+            <div class="proj-header"><div class="proj-name">{{name}}</div>{{#if link}}<a class="proj-link" href="{{link}}"><i class="fa-solid fa-arrow-up-right-from-square"></i>{{link}}</a>{{/if}}</div>
+            {{#if technologies}}<div class="proj-tech">{{technologies}}</div>{{/if}}
+            {{#if description}}<div class="proj-desc">{{description}}</div>{{/if}}
+            {{#if bullets.length}}<ul class="proj-bullets">{{#each bullets}}<li>{{this}}</li>{{/each}}</ul>{{/if}}
+            {{#if impact}}<div class="proj-impact"><i class="fa-solid fa-chart-line"></i>{{impact}}</div>{{/if}}
+          </div>
+        </div>{{/each}}
+      </div>{{/if}}
+
+      {{#if languages.length}}<div class="section"><div class="stitle">Languages</div><hr class="srule"/>
+        <div class="lang-tags">{{#each languages}}<div class="lang-tag"><i class="fa-solid fa-language"></i>{{this}}</div>{{/each}}</div>
+      </div>{{/if}}
+
+    </div>
+  </div>
+</div></body></html>

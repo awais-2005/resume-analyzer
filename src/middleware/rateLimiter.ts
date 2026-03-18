@@ -7,14 +7,14 @@ import path from "path";
 const [MAX_RPM, MAX_RPD] = [2, 5];
 const [DAY, MINUTE] = [86400, 60];
 
-interface Userlimter {
+interface UserLimiter {
     RPM: number; // Stores total req in current minute.
     RPD: number; // Stores total req in current day.
     lastDay: number;
     lastMinute: number;
 }
 
-function reset(userLimiter: Userlimter, minuteDiff: number, dayDiff: number): Userlimter {
+function reset(userLimiter: UserLimiter, minuteDiff: number, dayDiff: number): UserLimiter {
     return {
         RPD: dayDiff >= DAY ? 0 : userLimiter.RPD,
         RPM: dayDiff >= DAY || minuteDiff >= MINUTE ? 0 : userLimiter.RPM,
@@ -50,31 +50,31 @@ export default function rateLimiter(req: Request, res: Response, next: NextFunct
         throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, getErrorMessage(err));
     }
 
-    let userLimter: Userlimter | null = userIps[ip] ?? null;
-    const seconds = Date.now() / 1000;
-    const dayDiff: number = userLimter ? seconds - userLimter.lastDay : 0;
-    const minuteDiff: number = userLimter ? seconds - userLimter.lastMinute : 0;
+    let userLimiter: UserLimiter | null = userIps[ip] ?? null;
+    const now = Date.now() / 1000;
+    const dayDiff: number = userLimiter ? now - userLimiter.lastDay : 0;
+    const minuteDiff: number = userLimiter ? now - userLimiter.lastMinute : 0;
 
-    if (!userLimter) {
-        userLimter = {
+    if (!userLimiter) {
+        userLimiter = {
             RPD: 0,
             RPM: 0,
-            lastDay: seconds,
-            lastMinute: seconds,
-        } as Userlimter;
+            lastDay: now,
+            lastMinute: now,
+        } as UserLimiter;
     } else if (dayDiff >= DAY) {
-        userLimter = reset(userLimter, minuteDiff, dayDiff);
-    } else if (minuteDiff >= MINUTE && userLimter.RPD < MAX_RPD) {
-        userLimter = reset(userLimter, minuteDiff, dayDiff);
-    } else if (userLimter.RPD >= MAX_RPD) {
+        userLimiter = reset(userLimiter, minuteDiff, dayDiff);
+    } else if (minuteDiff >= MINUTE && userLimiter.RPD < MAX_RPD) {
+        userLimiter = reset(userLimiter, minuteDiff, dayDiff);
+    } else if (userLimiter.RPD >= MAX_RPD) {
         throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, "Per day limit is reached."); // Also unlock time in error
-    } else if (userLimter.RPM >= MAX_RPM) {
+    } else if (userLimiter.RPM >= MAX_RPM) {
         throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, "Per minute limit is reached. Please try after a minute."); // Also unlock time in error
     }
 
-    userLimter.RPD += 1;
-    userLimter.RPM += 1;
-    userIps[ip] = userLimter;
+    userLimiter.RPD += 1;
+    userLimiter.RPM += 1;
+    userIps[ip] = userLimiter;
 
     try {
         fs.truncateSync(outPath);

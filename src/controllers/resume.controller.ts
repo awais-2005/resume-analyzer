@@ -43,7 +43,7 @@ export class ResumeController {
 	}
 
 	// Upload single resume
-	async uploadResume(req: Request, res: Response): Promise<void> {
+	async getResumeMetaData(req: Request, res: Response): Promise<void> {
 		if (!req.file) {
 			throw new ApiError(HttpStatus.NOT_FOUND, "No resume file uploaded");
 		}
@@ -89,13 +89,16 @@ export class ResumeController {
 	// POST /resume/generate — Reformat into styled template
 	async generateResume(req: Request, res: Response): Promise<void> {
 
-		// Get raw text from frontend
-
-		const { resumeContent, analysis, fileType } = req.body;
+		const { resumeContent, analysis, templateId } = req.body;
 
 		if (!resumeContent || typeof resumeContent !== "string") {
 			throw new ApiError(HttpStatus.BAD_REQUEST, "No resume content provided");
 		}
+
+		if (templateId && typeof templateId !== "string") {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "Invalid template name provided");
+		}
+
 		const parsedAnalysis = analysis ? JSON.parse(analysis) : null;
 		if (!parsedAnalysis) {
 			throw new ApiError(HttpStatus.BAD_REQUEST, "No valid analysis provided");
@@ -104,147 +107,19 @@ export class ResumeController {
 		const polishContext = geminiService.extractApprovedSuggestions(parsedAnalysis);
 		const { polishSummary, ...structuredData } = await geminiService.generateImprovedContent(resumeContent, polishContext);
 
-		if (!fileType || fileType === "pdf") {
-			const pdfBuffer = await pdfService.renderToBuffer(structuredData);
-			res.setHeader("Content-Type", "application/pdf");
-			res.setHeader("Content-Disposition", 'attachment; filename="resume_formatted.pdf"');
-			const data: SummaryAndBufferResponse = {
-				polishSummary,
-				buffer: {
-					type: "Buffer",
-					mimeType: "pdf",
-					data: Array.from(pdfBuffer),
-				},
-			};
-			console.log("Generated PDF resume buffer size:", pdfBuffer.length);
-			res.status(200).send(new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume generated successfully."));
-			return;
-		} else if (fileType === "docx") {
-
-			const docxBuffer = await docxService.buildDocx(structuredData);
-
-			res.setHeader(
-				"Content-Type",
-				"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-			);
-			res.setHeader("Content-Disposition", 'attachment; filename="resume_formatted.docx"');
-
-			const data: SummaryAndBufferResponse = {
-				polishSummary,
-				buffer: {
-					type: "Buffer",
-					mimeType: "docx",
-					data: Array.from(docxBuffer),
-				},
-			};
-
-			console.log("Generated DOCX resume buffer size:", docxBuffer.length);
-
-			res.status(200).send(
-				new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume generated successfully.")
-			);
-		} else {
-			throw new ApiError(HttpStatus.BAD_REQUEST, "Unsupported file type requested");
-		}
-	}
-
-	async generateFixedResume(req: Request, res: Response): Promise<void> {
-		if (!req.file) {
-			throw new ApiError(HttpStatus.BAD_REQUEST, "No file uploaded");
-		}
-
-		const { buffer, mimetype } = req.file;
-		const rawText = await resumeService.extractTextFromBuffer(buffer, mimetype);
-		const analysis = await geminiService.analyzeResume(rawText);
-		const polishContext = geminiService.extractApprovedSuggestions(analysis);
-		const { polishSummary, ...structuredData } = await geminiService.generateImprovedContent(
-			rawText,
-			polishContext
-		);
-		const isPdf = true; // Assume PDF for this endpoint since we're using the PDF service
-
-		if (isPdf) {
-			const pdfBuffer = await pdfService.renderToBuffer(structuredData);
-			res.setHeader("Content-Type", "application/pdf");
-			res.setHeader("Content-Disposition", 'attachment; filename="resume_fixed.pdf"');
-			const data: SummaryAndBufferResponse = {
-				polishSummary,
-				buffer: {
-					type: "Buffer",
-					mimeType: "pdf",
-					data: Array.from(pdfBuffer),
-				},
-			};
-			res.status(200).send(new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume generated successfully."));
-			return;
-		} else {
-
-			const docxBuffer = await docxService.buildDocx(structuredData);
-
-			res.setHeader(
-				"Content-Type",
-				"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-			);
-			res.setHeader("Content-Disposition", 'attachment; filename="resume_formatted.docx"');
-
-			const data: SummaryAndBufferResponse = {
-				polishSummary,
-				buffer: {
-					type: "Buffer",
-					mimeType: "docx",
-					data: Array.from(docxBuffer),
-				}
-			};
-
-			res.status(200).send(
-				new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume generated successfully.")
-			);
-		}
-	}
-
-	// POST /resume/apply-suggestions — Keep original template, inject improved content
-	async applySuggestions(req: Request, res: Response): Promise<void> {
-		if (!req.file) {
-			throw new ApiError(HttpStatus.BAD_REQUEST, "No file uploaded");
-		}
-		if (!req.body.suggestions) {
-			throw new ApiError(HttpStatus.BAD_REQUEST, "No suggestions provided");
-		}
-
-		const suggestions: ResumePolishContext = JSON.parse(req.body.suggestions);
-		const { polishSummary, ...improvedContent } = await geminiService.generateImprovedContent(
-			req.body.resumeContent,
-			suggestions
-		);
-		let { buffer, mimetype } = req.file;
-
-		// If PDF, convert to DOCX first so we have editable XML
-		if (mimetype === "application/pdf") {
-			buffer = resumeService.pdfToDocxBuffer(buffer);
-		}
-
-		const outputBuffer = await docxService.injectContent<Partial<StructuredResume>>(
-			buffer,
-			improvedContent
-		);
-
-		res.setHeader(
-			"Content-Type",
-			"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-		);
-		res.setHeader("Content-Disposition", 'attachment; filename="resume_improved.docx"');
-
+		const pdfBuffer = await pdfService.renderToBuffer(structuredData, templateId);
+		res.setHeader("Content-Type", "application/pdf");
+		res.setHeader("Content-Disposition", 'attachment; filename="resume_formatted.pdf"');
 		const data: SummaryAndBufferResponse = {
 			polishSummary,
 			buffer: {
 				type: "Buffer",
-				mimeType: "docx",
-				data: Array.from(outputBuffer),
-			}
+				mimeType: "pdf",
+				data: Array.from(pdfBuffer),
+			},
 		};
-
-		res.status(200).send(
-			new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume improved successfully.")
-		);
+		console.log("Generated PDF resume buffer size:", pdfBuffer.length);
+		res.status(200).send(new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume generated successfully."));
+		return;
 	}
 }

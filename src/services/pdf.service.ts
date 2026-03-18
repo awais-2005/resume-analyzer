@@ -21,11 +21,22 @@ export class PdfService {
     }
     // ── Browser lifecycle ────────────────────────────────────────────────────
 
+    private async getLocalFAPath(): Promise<string> {
+        const faPath = path.resolve(
+            require.resolve("@fortawesome/fontawesome-free/css/all.min.css")
+        );
+        return `file://${faPath}`;
+    }
+
     private async getBrowser(): Promise<Browser> {
         if (!this.browser || !this.browser.connected) {
             this.browser = await puppeteer.launch({
                 headless: true,
-                args: ["--no-sandbox", "--disable-setuid-sandbox"],
+                args: [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-web-security",   // ← allows CDN loads
+                ],
             });
         }
         return this.browser;
@@ -69,7 +80,12 @@ export class PdfService {
         templateName: string = "classic"
     ): Promise<Buffer> {
         const compile = this.loadTemplate(templateName);
-        const html = compile(data);
+        const faPath = await this.getLocalFAPath();
+
+        const html = compile(data).replace(
+            "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css",
+            faPath
+        );
 
         const browser = await this.getBrowser();
         const page = await browser.newPage();

@@ -11,6 +11,7 @@
     "start": "nodemon src/server.ts"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.2.0",
     "@google/genai": "^1.44.0",
     "@google/generative-ai": "^0.24.1",
     "@types/pdf-parse": "^1.1.5",
@@ -39,6 +40,8 @@
     "typescript": "^5.9.3"
   },
   "nodemonConfig": {
-    "ignore": ["rateLimit/*"]
+    "ignore": [
+      "rateLimit/*"
+    ]
   }
 }
