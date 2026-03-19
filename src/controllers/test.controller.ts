@@ -25,7 +25,7 @@ export class Test {
     }
 
     getRandomValue(req: Request, res: Response): void {
-        res.status(200).send(new ApiResponse(true, this.randValue, "Server is reachable!"));
+        res.status(200).send(new ApiResponse(true, "version 1", "Server is reachable!"));
     }
 
     async pdfGenerationTest(req: Request, res: Response): Promise<void> {
