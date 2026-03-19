@@ -7,6 +7,7 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     res.status(err.statusCode).json({
       success: false,
       error: err.message,
+      stack: err.stack || "N/A",
     });
     return;
   }
@@ -20,18 +21,24 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     res.status(400).json({
       success: false,
       error: messages[err.code] || err.message,
+      stack: err.stack || "N/A",
     });
     return;
   }
 
   if (err.message === 'Only PDF, DOC, and DOCX files are allowed') {
-    res.status(400).json({ success: false, error: err.message });
+    res.status(400).json({
+      success: false,
+      error: err.message,
+      stack: err.stack || "N/A",
+    });
     return;
   }
 
   console.error(err);
   res.status(500).json({
     success: false,
-    error: 'Internal server error',
+    error: err.message,
+    stack: err.stack || "N/A",
   });
 }
