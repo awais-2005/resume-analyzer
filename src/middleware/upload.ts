@@ -2,9 +2,15 @@ import multer from 'multer';
 import path from 'path';
 import { Request } from 'express';
 
+import fs from 'fs';
+
 const storage = multer.diskStorage({
     destination(_req: Request, _file: Express.Multer.File, cb) {
-        cb(null, path.join(__dirname, '../../uploads/resumes'));
+        const uploadDir = path.join(__dirname, '../../uploads/resumes');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        cb(null, uploadDir);
     },
     filename(_req: Request, file: Express.Multer.File, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
