@@ -1,7 +1,13 @@
 import dotenv from 'dotenv'
 dotenv.config();
 
+
 import app from './app';
+import { ensureUploadsDir } from './utils/ensureUploadsDir';
+
+
+// Ensure uploads/resumes directory exists before starting the server
+ensureUploadsDir();
 
 (function (): void {
     try {
@@ -10,6 +16,6 @@ import app from './app';
         });
     } catch (error) {
         console.log("Could not start the app.");
-        process.exit(1);        
+        process.exit(1);
     }
 })();
