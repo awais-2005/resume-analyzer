@@ -16,7 +16,7 @@ The backend does four main things:
 3. Lets a user sign in with Google.
 4. Protects resume features so only logged-in users can use them.
 
-When the frontend talks to this backend, it sends requests to routes like `/auth/google` or `/resume/metadata`.
+When the frontend talks to this backend, it sends requests to routes like `/auth/google` or `/resume/analysis`.
 
 ---
 
@@ -52,11 +52,17 @@ In short: clicking the button sends the browser to the backend, the backend send
 
 ## 3. Google Login Flow
 
-The Google login flow is handled in two routes:
+The Google login flow is handled in two routes. These routes do not use a JSON request body or JSON response body.
 
 ### `GET /auth/google`
 
 This starts the Google login process.
+
+Request body:
+
+```json
+{}
+```
 
 In the backend, this route uses Passport with the Google strategy:
 
@@ -70,9 +76,23 @@ This means:
 2. Ask Google for the user’s email.
 3. Do not use server sessions.
 
+Response body:
+
+```json
+{}
+```
+
+Actual response: a redirect to Google's login page.
+
 ### `GET /auth/google/callback`
 
 This route runs after Google login is finished.
+
+Request body:
+
+```json
+{}
+```
 
 If Google login works:
 
@@ -92,6 +112,14 @@ If `FRONTEND_URL` is not set in the environment, the backend uses:
 http://localhost:3000
 ```
 
+Response body:
+
+```json
+{}
+```
+
+Actual response: a redirect to `FRONTEND_URL/auth/callback?token=...`.
+
 ---
 
 ## 4. Other Login Options
@@ -102,7 +130,7 @@ The backend also supports normal email and password login.
 
 `POST /auth/register`
 
-The user sends:
+Request body:
 
 ```json
 {
@@ -121,11 +149,28 @@ What the backend does:
 5. Creates a JWT token.
 6. Returns the user data and token.
 
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "jwt-token-here",
+    "user": {
+      "id": "user-id",
+      "email": "john@example.com",
+      "name": "John Doe"
+    }
+  },
+  "message": "User registered successfully"
+}
+```
+
 ### Login
 
 `POST /auth/login`
 
-The user sends:
+Request body:
 
 ```json
 {
@@ -141,6 +186,23 @@ What the backend does:
 3. Compares the password with the saved hashed password.
 4. If the password is correct, creates a JWT token.
 5. Returns the user data and token.
+
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "jwt-token-here",
+    "user": {
+      "id": "user-id",
+      "email": "john@example.com",
+      "name": "John Doe"
+    }
+  },
+  "message": "Login successful"
+}
+```
 
 ---
 
@@ -160,17 +222,166 @@ So before any resume route runs, the backend checks if the user is authenticated
 
 The resume router includes these routes:
 
-### `POST /resume/metadata`
+### `GET /resume/history`
 
-Gets resume metadata from an uploaded file.
+This returns the saved resume history for the logged-in user.
 
-### `POST /resume/generate`
+Request body:
 
-Creates a generated resume file.
+```json
+{}
+```
+
+Headers:
+
+```http
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "history-id",
+        "title": "Resume Analysis",
+        "prevScore": 68,
+        "newScore": 81,
+        "unfixedResume": "https://...",
+        "fixedResume": "https://...",
+        "timestamp": "2026-07-04T12:00:00.000Z"
+      }
+    ]
+  },
+  "message": "Resume history fetched successfully."
+}
+```
 
 ### `POST /resume/analysis`
 
-Analyzes the resume content.
+Uploads a resume file, analyzes it, and stores the original resume history.
+
+Request body:
+
+This route uses `multipart/form-data`.
+
+```text
+resume: <file>
+```
+
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "title": "Software Engineer Resume",
+    "overallScore": 82,
+    "atsScore": 80,
+    "formattingScore": 84,
+    "keywordScore": 81,
+    "impactScore": 79,
+    "clarityScore": 83,
+    "creativityScore": 70,
+    "grade": "B+",
+    "recruiterVerdict": "Strong candidate with room to sharpen impact.",
+    "overallFeedback": "...",
+    "strengths": [],
+    "weaknesses": [],
+    "missedOpportunities": [],
+    "grammarIssues": [],
+    "impactUpgrades": [],
+    "creativityBoosts": [],
+    "keywordSuggestions": [],
+    "formattingTips": [],
+    "redFlags": [],
+    "candidatePersona": {
+      "archetype": "...",
+      "tone": "...",
+      "standoutFactor": "...",
+      "hiringRisk": "low",
+      "hiringRiskReason": "..."
+    },
+    "historyId": "history-id",
+    "resumeContent": "raw extracted resume text"
+  },
+  "message": "Resume analysis completed successfully."
+}
+```
+
+### `POST /resume/generate`
+
+Generates a polished resume PDF from a previous analysis result.
+
+Request body:
+
+```json
+{
+  "templateId": "classic",
+  "analysis": {
+    "title": "Software Engineer Resume",
+    "overallScore": 82,
+    "atsScore": 80,
+    "formattingScore": 84,
+    "keywordScore": 81,
+    "impactScore": 79,
+    "clarityScore": 83,
+    "creativityScore": 70,
+    "grade": "B+",
+    "recruiterVerdict": "Strong candidate with room to sharpen impact.",
+    "overallFeedback": "...",
+    "strengths": [],
+    "weaknesses": [],
+    "missedOpportunities": [],
+    "grammarIssues": [],
+    "impactUpgrades": [],
+    "creativityBoosts": [],
+    "keywordSuggestions": [],
+    "formattingTips": [],
+    "redFlags": [],
+    "candidatePersona": {
+      "archetype": "...",
+      "tone": "...",
+      "standoutFactor": "...",
+      "hiringRisk": "low",
+      "hiringRiskReason": "..."
+    },
+    "historyId": "history-id",
+    "resumeContent": "raw extracted resume text"
+  }
+}
+```
+
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "polishSummary": {
+      "estimatedNewScore": 88,
+      "summary": "..."
+    },
+    "buffer": {
+      "type": "Buffer",
+      "mimeType": "pdf",
+      "data": [1, 2, 3]
+    },
+    "historyId": "history-id",
+    "fixedResumeUrl": "https://..."
+  },
+  "message": "Resume generated successfully."
+}
+```
+
+The route also sends the file as an attachment with this header:
+
+```http
+Content-Disposition: attachment; filename="resume_formatted.pdf"
+```
 
 If the user is not logged in, these routes should be blocked by `requireAuth`.
 
@@ -178,15 +389,106 @@ If the user is not logged in, these routes should be blocked by `requireAuth`.
 
 ## 6. Test Route
 
-### `GET /test`
+### `POST /test/chat`
 
-This route is a simple check to see if the API is running.
+Sends a message to Gemini and returns a chat-style response.
 
-Example response:
+Request body:
 
 ```json
 {
-  "data": "Received"
+  "message": "Write a short intro for my resume",
+  "context": "I am a frontend engineer"
+}
+```
+
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "response": "...",
+    "context": "..."
+  },
+  "message": "Message processed successfully"
+}
+```
+
+### `GET /test/pdf`
+
+Creates a sample PDF from mock resume data.
+
+Request body:
+
+```json
+{}
+```
+
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "type": "Buffer",
+    "data": [1, 2, 3]
+  },
+  "message": "Resume has been created successfully!"
+}
+```
+
+### `POST /test/r2-upload`
+
+Uploads one PDF file to R2 for a storage smoke test.
+
+Request body:
+
+This route uses `multipart/form-data`.
+
+```text
+resume: <file>
+```
+
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "key": "resumes/test-user/test-upload/unfixed-...-resume.pdf",
+    "url": "https://...",
+    "fileName": "resume.pdf"
+  },
+  "message": "PDF uploaded to R2 successfully"
+}
+```
+
+### `GET /test/userhistory`
+
+Returns the logged-in user history in the same shape as `/resume/history`.
+
+Request body:
+
+```json
+{}
+```
+
+Headers:
+
+```http
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+Response body:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": []
+  },
+  "message": "Resume history fetched successfully."
 }
 ```
 
@@ -265,7 +567,7 @@ The server code that runs behind the frontend.
 
 ### Route
 
-A URL path like `/auth/login` or `/resume/metadata`.
+A URL path like `/auth/login` or `/resume/analysis`.
 
 ### JWT token
 
