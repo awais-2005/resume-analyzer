@@ -23,6 +23,11 @@ initPassport(app);
 // app.use(rateLimiter);
 app.use(requestLogger);
 
+// Lightweight health check for uptime pings (keeps Render free-tier instance awake)
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 app.use("/auth", authRouter);
 app.use("/test", testRouter);
 app.use("/resume", requireAuth, resumeRouter);
