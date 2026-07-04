@@ -3,6 +3,8 @@ import { PolishSummary } from "./structuredResume.types";
 export interface SummaryAndBufferResponse {
     polishSummary: PolishSummary;
     buffer: ResumeBuffer;
+    historyId?: string;
+    fixedResumeUrl?: string;
 }
 
 export interface ResumeBuffer {
@@ -14,4 +16,18 @@ export interface ResumeBuffer {
 export interface ChatResponse {
     response: string;
     context: string;
+}
+
+export interface TaskHistoryResponse {
+    items: TaskHistoryItem[];
+}
+
+export interface TaskHistoryItem {
+    id: string;
+    title: string;
+    prevScore: number;
+    newScore?: number | null;
+    unfixedResume: string;
+    fixedResume?: string | null;
+    timestamp: string;
 }

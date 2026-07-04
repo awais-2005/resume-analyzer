@@ -1,4 +1,5 @@
 export interface ResumeAnalysis {
+  title: string;
   overallScore: number;
   atsScore: number;
   formattingScore: number;
@@ -24,6 +25,11 @@ export interface ResumeAnalysis {
 
   candidatePersona: CandidatePersona;
 }
+
+export type ResumeAnalysisWithHistory = ResumeAnalysis & {
+  historyId?: string;
+  resumeContent?: string;
+};
 
 // --- Approvable interfaces (all have apply: boolean) ---
 

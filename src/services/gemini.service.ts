@@ -11,13 +11,17 @@ const ai = new GoogleGenAI({
 
 export class GeminiService {
 
-  private model: string = "gemini-3.1-flash-lite-preview"; // Default model, can be overridden in constructor
+  private model: string;
 
   private static instance: GeminiService;
 
-  public static getInstance(): GeminiService {
+  constructor(model: string) {
+    this.model = model;
+  }
+
+  public static getInstance(model: string = "gemma-4-31b-it"): GeminiService {
     if (!GeminiService.instance) {
-      GeminiService.instance = new GeminiService();
+      GeminiService.instance = new GeminiService(model);
     }
     return GeminiService.instance;
   }
@@ -206,9 +210,17 @@ ABSOLUTE RULES:
 
 ---
 
+Title rules:
+- Set "title" to "candidateName + Role".
+- Use the candidate's name from the resume and the most appropriate role inferred from the resume content.
+- If the name is missing, use the role alone rather than inventing a name.
+
+---
+
 SCHEMA:
 
 {
+  "title": string,
   "overallScore": number,
   "atsScore": number,
   "formattingScore": number,

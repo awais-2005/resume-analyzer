@@ -38,12 +38,5 @@ export const uploadSingle = multer({
     limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 }).single('resume');
 
-// Memory-based upload for endpoints that process buffers directly
-export const uploadMemory = multer({
-    storage: multer.memoryStorage(),
-    fileFilter,
-    limits: { fileSize: 10 * 1024 * 1024 }
-}).single('resume');
-
 // Parsing form-data when there is not file.
 export const uploadNone = multer().none();
