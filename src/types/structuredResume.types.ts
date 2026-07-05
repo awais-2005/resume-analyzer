@@ -6,6 +6,7 @@ export interface StructuredResume {
   linkedin: string;
   github: string;
   website?: string;
+  profileImage?: string;
   headline: string;
   summary: string;
   experience: {

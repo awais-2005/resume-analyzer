@@ -40,3 +40,19 @@ export const uploadSingle = multer({
 
 // Parsing form-data when there is not file.
 export const uploadNone = multer().none();
+
+const validImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
+
+function imageFilter(_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) {
+    if (validImageTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only JPEG, PNG, and WEBP image files are allowed'));
+    }
+}
+
+export const uploadProfileImage = multer({
+    storage,
+    fileFilter: imageFilter,
+    limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+}).single('profileImage');

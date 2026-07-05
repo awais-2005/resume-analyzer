@@ -11,6 +11,7 @@ import { SummaryAndBufferResponse, TaskHistoryItem, TaskHistoryResponse } from "
 import { PdfService } from "../services/pdf.service";
 import { R2StorageService } from "../services/r2-storage.service";
 import { History, IHistory } from "../models/History";
+import { StructuredResume } from "../types/structuredResume.types";
 
 const resumeService = ResumeService.getInstance();
 const geminiService = GeminiService.getInstance();
@@ -28,8 +29,9 @@ export class ResumeController {
 	}
 
 	async resumeAnalysis(req: Request, res: Response): Promise<void> {
-		const userId = req.userId;
 		const uploadedResume = req.file;
+		try {
+		const userId = req.userId;
 		let contentForAnalysis: string;
 
 		if (!userId) {
@@ -92,6 +94,11 @@ export class ResumeController {
 				"Resume analysis completed successfully."
 			)
 		);
+		} finally {
+			if (uploadedResume) {
+				await fs.unlink(uploadedResume.path).catch(err => console.error("Failed to delete uploaded resume:", err));
+			}
+		}
 	}
 
 	async getHistory(req: Request, res: Response): Promise<void> {
@@ -191,6 +198,100 @@ export class ResumeController {
 		};
 		res.status(200).send(new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume generated successfully."));
 		return;
+	}
+
+	async createResume(req: Request, res: Response): Promise<void> {
+		const profileImage = req.file;
+		try {
+		const { templateId, resumeData } = req.body;
+		const userId = req.userId;
+
+		if (!userId) {
+			throw new ApiError(HttpStatus.UNAUTHORIZED, "Unauthorized");
+		}
+
+		if (!templateId || typeof templateId !== "string") {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "Invalid template ID provided");
+		}
+
+		if (!resumeData || typeof resumeData !== "string") {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "No resume data provided");
+		}
+
+		let parsedData: StructuredResume;
+		try {
+			parsedData = JSON.parse(resumeData);
+		} catch (error) {
+			throw new ApiError(HttpStatus.BAD_REQUEST, "Invalid resume data JSON");
+		}
+
+		if (profileImage) {
+			const imageBuffer = await fs.readFile(profileImage.path);
+			const base64Image = imageBuffer.toString("base64");
+			parsedData.profileImage = `data:${profileImage.mimetype};base64,${base64Image}`;
+		}
+
+		let calculatedScore = 85;
+		try {
+			const analysis = await geminiService.analyzeResume(resumeData);
+			calculatedScore = analysis.overallScore;
+		} catch (error) {
+			console.warn("Failed to calculate initial score during resume creation:", error);
+		}
+
+		const pdfBuffer = await pdfService.renderToBuffer(parsedData, templateId);
+
+		const history = new History({
+			userId,
+			title: `Created Resume - ${parsedData.headline || "New"}`,
+			prevScore: 0,
+			newScore: calculatedScore,
+			unfixedResume: "N/A",
+			fixedResume: "",
+		});
+
+		let fixedResumeUrl: string | undefined;
+		const fixedResumeKey = r2StorageService.buildResumePdfKey(
+			userId,
+			history._id.toString(),
+			"fixed",
+			"resume_created.pdf"
+		);
+
+		try {
+			fixedResumeUrl = await r2StorageService.uploadPdf(pdfBuffer, fixedResumeKey);
+			history.fixedResume = fixedResumeUrl;
+		} catch (error) {
+			console.warn("R2 upload failed during resume creation:", error);
+		}
+		
+		await history.save();
+
+		res.setHeader("Content-Type", "application/pdf");
+		res.setHeader("Content-Disposition", 'attachment; filename="resume_created.pdf"');
+		
+		const data: SummaryAndBufferResponse = {
+			polishSummary: {
+				changesApplied: ["Generated new resume from template"],
+				scoreImprovementAreas: ["N/A"],
+				atsKeywordsInjected: [],
+				estimatedNewScore: calculatedScore
+			},
+			buffer: {
+				type: "Buffer",
+				mimeType: "pdf",
+				data: Array.from(pdfBuffer),
+			},
+			historyId: history._id.toString(),
+			...(fixedResumeUrl && { fixedResumeUrl }),
+		};
+
+		res.status(200).send(new ApiResponse<SummaryAndBufferResponse>(true, data, "Resume created successfully."));
+		} finally {
+			if (profileImage) {
+				await fs.unlink(profileImage.path).catch(err => console.error("Failed to delete uploaded profile image:", err));
+			}
+		}
 	}
 
 	private parseAnalysis(analysis: unknown): ResumeAnalysisWithHistory | null {
