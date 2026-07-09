@@ -29,5 +29,10 @@ export interface TaskHistoryItem {
     newScore?: number | null;
     unfixedResume: string;
     fixedResume?: string | null;
+    hasAnalysis: boolean;
     timestamp: string;
+}
+
+export interface DeleteHistoryResponse {
+    id: string;
 }

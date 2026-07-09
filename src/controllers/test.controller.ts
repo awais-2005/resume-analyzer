@@ -51,6 +51,7 @@ export class Test {
             newScore: history.newScore ?? null,
             unfixedResume: history.unfixedResume,
             fixedResume: history.fixedResume ?? null,
+            hasAnalysis: Boolean(history.analysisSnapshot),
             timestamp: new Date(history.timestamp).toISOString(),
         }));
 

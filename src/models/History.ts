@@ -7,6 +7,7 @@ export interface IHistory extends Document {
   newScore?: number | null;
   unfixedResume: string;
   fixedResume?: string | null;
+  analysisSnapshot?: string | null;
   timestamp: Date;
 }
 
@@ -45,6 +46,13 @@ export const HistorySchema = new Schema<IHistory>(
     fixedResume: {
       type: String,
       trim: true,
+      default: null,
+    },
+    // JSON snapshot of the Gemini analysis + resumeContent, captured at
+    // analysis time. Lets a user reopen/reuse a past analysis later without
+    // paying for another Gemini call.
+    analysisSnapshot: {
+      type: String,
       default: null,
     },
     timestamp: {

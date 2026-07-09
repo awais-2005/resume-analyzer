@@ -1,0 +1,17 @@
+[TIMING] POST /resume/analysis — started
+[TIMING] POST /resume/analysis › file-parse (extract text): 450ms
+[TIMING] POST /resume/analysis › LLM (analyzeResume): 61.30s      ← slowest step
+[TIMING] POST /resume/analysis › read uploaded file: 3ms
+[TIMING] POST /resume/analysis › R2 (upload unfixed PDF): 1.27s
+[TIMING] POST /resume/analysis › MongoDB (save history): 120ms
+[TIMING] POST /resume/analysis — done in 63.00s (file-parse=450ms, LLM=61.30s, ...)
+
+[TIMING] POST /resume/generate — started
+[TIMING] POST /resume/generate › parse request body: 0ms
+[TIMING] POST /resume/generate › MongoDB (fetch history): 200ms
+[TIMING] POST /resume/generate › extract approved suggestions: 1ms
+[TIMING] POST /resume/generate › LLM (generateImprovedContent): 92.50s  ← slowest step
+[TIMING] POST /resume/generate › PDF render (Puppeteer): 10.20s
+[TIMING] POST /resume/generate › R2 (upload fixed PDF): 1.41s
+[TIMING] POST /resume/generate › MongoDB (update history): 200ms
+[TIMING] POST /resume/generate — done in 104.63s (...)
