@@ -1,69 +1,132 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { StructuredResume } from "../types/structuredResume.types";
 import { ResumeAnalysis, ResumePolishContext } from "../types/ResumeAnalysis";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ChatResponse } from "../types/Responses";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+/* ------------------------------------------------------------------------
+ * v2 of this file: dropped zod (schema-to-JSON-Schema conversion was
+ * throwing errors against Gemini's limited JSON Schema subset). Back to
+ * describing the shape in the prompt, forcing JSON mode via
+ * responseMimeType, and parsing directly -- but with real latency fixes
+ * this time, not just the model swap:
+ *
+ * - Model: gemini-3.1-flash-lite (was gemma-4-31b-it -- a dense,
+ *   thinking-capable open model, almost certainly the root cause of the
+ *   original 61s/92s latencies).
+ * - Singleton bug fixed: getInstance() takes no model arg -- model
+ *   selection lives inside each method. Update any
+ *   GeminiService.getInstance("...") call sites elsewhere to drop the arg.
+ * - thinkingLevel explicit per call: "minimal" for pure extraction
+ *   (parseResume, remapText, testModel), "low" for judgment-heavy calls
+ *   (analyzeResume, generateImprovedContent).
+ * - Array sizes are capped in the prompt (e.g. grammarIssues max 5) --
+ *   output token count is the actual latency driver, so bounding
+ *   "find every issue" style instructions gives a real, predictable
+ *   ceiling instead of unbounded generation.
+ * - maxOutputTokens set as a hard backstop per call.
+ * - "apply" is force-set to false in code after parsing, on every
+ *   suggestion array -- cheap, reliable replacement for schema-level
+ *   enforcement.
+ * - Unified onto @google/genai; the legacy @google/generative-ai client is
+ *   gone from this file.
+ *
+ * NOT changed: generateImprovedContent still returns a full resume rewrite
+ * rather than a patch of only approved suggestions -- that needs changes
+ * in remapText's caller / DOCX-mapping code outside this file.
+ * ---------------------------------------------------------------------- */
+
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY!,
 });
 
+// Centralized model choice -- change this one constant to A/B test a
+// different tier without touching call sites.
+const MODELS = {
+  DEFAULT: "gemini-3.1-flash-lite",
+} as const;
+
 export class GeminiService {
-
-  private model: string;
-
   private static instance: GeminiService;
 
-  constructor(model: string) {
-    this.model = model;
-  }
-
-  public static getInstance(model: string = "gemma-4-31b-it"): GeminiService {
+  public static getInstance(): GeminiService {
     if (!GeminiService.instance) {
-      GeminiService.instance = new GeminiService(model);
+      GeminiService.instance = new GeminiService();
     }
     return GeminiService.instance;
   }
 
-  // Simple test to verify Gemini connectivity and response
-  async testModel(message: string, context: string): Promise<ChatResponse> {
+  private constructor() { }
 
-    const prompt = `You are a helpful assistant. Respond to the user's message in a friendly and concise manner.
-
-Message: ${message}
-Context: ${context}
-
-You MUST respond with ONLY a valid JSON object. No explanation, no markdown, no code blocks.
-
-Required format:
-{
-  "responseToMessage": "your friendly response to the user here",
-  "updatedContext": "a brief updated summary of the conversation so far, including this latest exchange"
-}`;
+  /**
+   * Shared call path for every Gemini request in this service.
+   * Forces JSON mode, applies a thinking level + output token cap, and
+   * parses the result. No schema validation library -- the prompt
+   * describes the shape; callers should treat the result defensively
+   * (see normalizeApplyFalse below for one example).
+   */
+  private async generateJSON<T>(
+    prompt: string,
+    opts: { model?: string; thinkingLevel?: ThinkingLevel; maxOutputTokens?: number } = {}
+  ): Promise<T> {
+    const { model = MODELS.DEFAULT, thinkingLevel = ThinkingLevel.LOW, maxOutputTokens } = opts;
 
     const response = await ai.models.generateContent({
-      model: this.model,
+      model,
       contents: prompt,
-    })
-    const text: string = response.text ?? "";
-    if (!text) {
-      throw new Error("Gemini response is empty");
-    }
+      config: {
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel },
+        ...(maxOutputTokens ? { maxOutputTokens } : {}),
+      },
+    });
 
+    const raw = response.text ?? "";
     try {
-      const jsonStart = text.indexOf("{");
-      const jsonEnd = text.lastIndexOf("}");
-      const cleanJson = text.slice(jsonStart, jsonEnd + 1);
-      const parsed = JSON.parse(cleanJson);
-      return {
-        response: parsed.responseToMessage,
-        context: parsed.updatedContext
-      };
-    } catch (error) {
-      console.error("Failed to parse Gemini response:", text);
-      throw new Error("Failed to parse Gemini response");
+      return JSON.parse(raw) as T;
+    } catch {
+      throw new Error(
+        `Gemini did not return valid JSON (model: ${model}). First 300 chars:\n${raw.slice(0, 300)}`
+      );
     }
+  }
+
+  // Defense-in-depth: force apply=false on every suggestion item,
+  // regardless of what the model returned. Cheap replacement for the
+  // schema-level guarantee we had with zod's z.literal(false).
+  private normalizeApplyFalse(analysis: ResumeAnalysis): ResumeAnalysis {
+    const forceFalse = <T extends { apply?: boolean }>(items?: T[]) =>
+      items?.map((item) => ({ ...item, apply: false }));
+
+    return {
+      ...analysis,
+      grammarIssues: forceFalse(analysis.grammarIssues) ?? analysis.grammarIssues,
+      impactUpgrades: forceFalse(analysis.impactUpgrades) ?? analysis.impactUpgrades,
+      creativityBoosts: forceFalse(analysis.creativityBoosts) ?? analysis.creativityBoosts,
+      keywordSuggestions: forceFalse(analysis.keywordSuggestions) ?? analysis.keywordSuggestions,
+      formattingTips: forceFalse(analysis.formattingTips) ?? analysis.formattingTips,
+      redFlags: forceFalse(analysis.redFlags) ?? analysis.redFlags,
+    };
+  }
+
+  // Simple test to verify Gemini connectivity and response
+  async testModel(message: string, context: string): Promise<ChatResponse> {
+    const prompt = `You are a helpful assistant. Respond to the user's message in a friendly and concise manner.
+
+Return ONLY a JSON object, no markdown fences, no commentary, in this exact shape:
+{"responseToMessage": "string", "updatedContext": "string"}
+
+Message: ${message}
+Context: ${context}`;
+
+    const parsed = await this.generateJSON<{ responseToMessage: string; updatedContext: string }>(
+      prompt,
+      { thinkingLevel: ThinkingLevel.MINIMAL, maxOutputTokens: 512 }
+    );
+
+    return {
+      response: parsed.responseToMessage,
+      context: parsed.updatedContext,
+    };
   }
 
   // Generate the context for resume polishing based on the analysis results
@@ -82,12 +145,12 @@ Required format:
       missedOpportunities: analysis.missedOpportunities,
       candidatePersona: analysis.candidatePersona,
 
-      grammarIssues: analysis.grammarIssues?.filter(i => i.apply),
-      impactUpgrades: analysis.impactUpgrades?.filter(i => i.apply),
-      creativityBoosts: analysis.creativityBoosts?.filter(i => i.apply),
-      keywordSuggestions: analysis.keywordSuggestions?.filter(i => i.apply),
-      formattingTips: analysis.formattingTips?.filter(i => i.apply),
-      redFlags: analysis.redFlags?.filter(i => i.apply),
+      grammarIssues: analysis.grammarIssues?.filter((i) => i.apply),
+      impactUpgrades: analysis.impactUpgrades?.filter((i) => i.apply),
+      creativityBoosts: analysis.creativityBoosts?.filter((i) => i.apply),
+      keywordSuggestions: analysis.keywordSuggestions?.filter((i) => i.apply),
+      formattingTips: analysis.formattingTips?.filter((i) => i.apply),
+      redFlags: analysis.redFlags?.filter((i) => i.apply),
     };
   }
 
@@ -97,306 +160,61 @@ Required format:
     suggestions: ResumePolishContext
   ): Promise<StructuredResume> {
     const prompt = this.buildPolishPrompt(resumeContent, suggestions);
-    const result = await ai.models.generateContent({
-      model: this.model,
-      contents: prompt,
+    return this.generateJSON<StructuredResume>(prompt, {
+      thinkingLevel: ThinkingLevel.LOW,
+      maxOutputTokens: 8192,
     });
-    const text = result.text ?? "";
-    let parsed: StructuredResume;
-    try {
-      const jsonStart = text.indexOf("{");
-      const jsonEnd = text.lastIndexOf("}");
-      const cleanJson = text.slice(jsonStart, jsonEnd + 1).replace(/:\s*undefined/g, ": null");;
-      parsed = JSON.parse(cleanJson);
-    } catch (error) {
-      console.error("Failed to parse improved content response:", text);
-      throw new Error("Failed to parse improved content response");
-    }
-    return parsed;
   }
 
   // Analyze resume and return detailed feedback and suggestions
   async analyzeResume(resumeContent: string): Promise<ResumeAnalysis> {
-    const prompt = `
-You are a senior ATS resume analyst and career strategist. You are precise, evidence-based, and never pad your analysis with generic advice.
-
-Your analysis must be GROUNDED IN THE RESUME ONLY.
-Every suggestion, keyword, flag, and upgrade must be directly traceable to something that EXISTS in the resume — a project, a role, a skill, a phrase, a technology mentioned.
-
----
-
-CONTEXT-AWARENESS RULES (read these first — they override everything):
-
-1. **Only suggest what the resume supports.**
-   - If the resume has no skills section → suggest skills ONLY derived from projects, experience, or education mentioned in the resume.
-   - If the resume has no projects → do not suggest project-related keywords.
-   - If a technology appears in a project or job description → it is fair to suggest adding it to skills.
-   - NEVER suggest certifications, skills, or keywords that have zero evidence in the resume.
-
-2. **Keyword suggestions must cite their evidence.**
-   - Every keyword suggestion must include an "evidenceFrom" field quoting the exact resume text that justifies it.
-   - Example: Resume says "built an Android app using Kotlin" → suggest "Kotlin", "Android Development", "Mobile Development" with evidenceFrom: "built an Android app using Kotlin".
-   - No evidence = no suggestion. Period.
-
-3. **Do not flag what isn't there as a problem.**
-   - Missing sections (skills, projects, certifications) are a "missedOpportunity", NOT a redFlag or weakness, unless their absence directly hurts ATS compatibility.
-   - A resume with no projects section should not be penalized in impactScore for missing project bullets.
-
-4. **Score honestly with calibration.**
-   - If overallScore >= 85, weaknesses and grammarIssues should only contain REAL, significant issues — not stylistic nitpicks.
-   - Do not manufacture issues to appear thorough.
-   - An array being empty [] is valid and honest. Prefer it over padding.
-
-5. **apply field — always default to false.**
-   - Every suggestion, fix, upgrade, tip, and flag must include "apply": false.
-   - This field is controlled by the user — Gemini always outputs false.
-   - Never output "apply": true under any circumstance.
-
----
-
-EVALUATION DIMENSIONS:
-
-- **atsScore**: Keyword density, section labeling, ATS-safe structure, scannability
-- **formattingScore**: Hierarchy, whitespace, consistency — only penalize what's actually broken
-- **keywordScore**: Role-relevant terms found vs. expected — based ONLY on what the resume's own content implies
-- **impactScore**: Bullet strength, action verbs, quantification — only for sections that exist
-- **clarityScore**: Writing economy, precision, grammar
-- **creativityScore**: Differentiation, memorable phrasing, personality signal
-- **overallScore**: Weighted average — ATS(25%) + Impact(30%) + Keywords(20%) + Formatting(15%) + Clarity(10%)
-
-Grade mapping:
-  95–100 = A+
-  90–94  = A
-  80–89  = B+
-  75–79  = B
-  65–74  = C
-  55–64  = D
-  <55    = F
-
----
-
-ANALYSIS TASKS:
-
-**grammarIssues** — Only flag real grammar, tense consistency, or clarity errors. Quote the exact original text. Severity: "critical" (changes meaning), "moderate" (noticeable to recruiter), "minor" (subtle). Empty array if none found.
-
-**impactUpgrades** — Find weak, passive, or vague bullets. Rewrite using: [Action Verb] + [Scope] + [Measurable Outcome]. Only upgrade bullets that exist. Do not invent metrics — use conservative inference only when the context clearly supports it.
-
-**creativityBoosts** — Flag clichés and generic phrases (e.g., "team player", "passionate about", "responsible for", "worked with"). Replace with sharp, specific alternatives. Must quote original text exactly.
-
-**keywordSuggestions** — Suggest only keywords that:
-  a) Are directly evidenced by resume content
-  b) Would improve ATS matching for the role implied by the resume
-  c) Include the exact evidenceFrom quote
-
-**formattingTips** — Only flag actual formatting problems observed (e.g., inconsistent date formats, missing section headers, walls of text). Do not suggest formatting changes for things you cannot verify exist.
-
-**redFlags** — Real deal-breakers only: unexplained gaps, no quantification anywhere, completely missing contact info, ATS-breaking formatting. Not stylistic preferences.
-
-**missedOpportunities** — Sections or elements absent from the resume that would meaningfully improve it (e.g., "No skills section despite multiple technologies mentioned in projects", "GitHub link absent despite software projects listed").
-
-**recruiterVerdict** — One sentence, max 20 words, gut-reaction after 6 seconds of scanning.
-
-**candidatePersona** — Archetype + tone + standout factor + hiring risk based strictly on what's written.
-
----
-
-ABSOLUTE RULES:
-- Never suggest skills, keywords, or technologies not evidenced in the resume.
-- Never flag a missing section as a weakness unless it directly breaks ATS parsing.
-- Never fill arrays just to look thorough — empty arrays are valid.
-- Every suggestion and fix must have "apply": false.
-- Return ONLY valid JSON. No markdown, no code blocks, no comments, no text outside JSON.
-- Response MUST start with { and end with }.
-
----
-
-Title rules:
-- Set "title" to "candidateName + Role".
-- Use the candidate's name from the resume and the most appropriate role inferred from the resume content.
-- If the name is missing, use the role alone rather than inventing a name.
-
----
-
-SCHEMA:
-
-{
-  "title": string,
-  "overallScore": number,
-  "atsScore": number,
-  "formattingScore": number,
-  "keywordScore": number,
-  "impactScore": number,
-  "clarityScore": number,
-  "creativityScore": number,
-  "grade": "A+" | "A" | "B+" | "B" | "C" | "D" | "F",
-  "recruiterVerdict": string,
-  "overallFeedback": string,
-  "strengths": string[],
-  "weaknesses": string[],
-  "missedOpportunities": string[],
-  "grammarIssues": [
-    {
-      "original": string,
-      "suggestion": string,
-      "context": string,
-      "severity": "minor" | "moderate" | "critical",
-      "apply": false
-    }
-  ],
-  "impactUpgrades": [
-    {
-      "original": string,
-      "upgraded": string,
-      "reason": string,
-      "apply": false
-    }
-  ],
-  "creativityBoosts": [
-    {
-      "original": string,
-      "suggestion": string,
-      "context": string,
-      "apply": false
-    }
-  ],
-  "keywordSuggestions": [
-    {
-      "keyword": string,
-      "reason": string,
-      "evidenceFrom": string,
-      "apply": false
-    }
-  ],
-  "formattingTips": [
-    {
-      "tip": string,
-      "reason": string,
-      "apply": false
-    }
-  ],
-  "redFlags": [
-    {
-      "issue": string,
-      "impact": string,
-      "fix": string,
-      "apply": false
-    }
-  ],
-  "candidatePersona": {
-    "archetype": string,
-    "tone": string,
-    "standoutFactor": string,
-    "hiringRisk": "low" | "medium" | "high",
-    "hiringRiskReason": string
-  }
-}
-
----
-
-Resume Content:
-${resumeContent}
-`;
-
-    const response = await ai.models.generateContent({
-      model: this.model,
-      contents: prompt,
+    const prompt = this.buildAnalysisPrompt(resumeContent);
+    const result = await this.generateJSON<ResumeAnalysis>(prompt, {
+      thinkingLevel: ThinkingLevel.LOW,
+      maxOutputTokens: 4096,
     });
-
-    const text = response.text ?? "";
-    let parsed: ResumeAnalysis;
-    try {
-      const jsonStart = text.indexOf("{");
-      const jsonEnd = text.lastIndexOf("}");
-      const cleanJson = text.slice(jsonStart, jsonEnd + 1);
-      parsed = JSON.parse(cleanJson);
-    } catch (error) {
-      throw new Error("Failed to parse ATS analysis response\n" + text);
-    }
-
-    return parsed;
+    return this.normalizeApplyFalse(result);
   }
 
-  // Parse resume text → structured JSON via Gemini
+  // Parse resume text -> structured JSON via Gemini
   async parseResume(rawText: string): Promise<StructuredResume> {
-    const model = genAI.getGenerativeModel({
-      model: this.model,
-      generationConfig: { responseMimeType: "application/json" },
-    });
+    const prompt = `Extract this resume into structured JSON. Use empty strings for missing text fields and empty arrays for missing array fields -- do not invent data that isn't in the resume.
 
-    const prompt = `Extract this resume into structured JSON matching this exact schema.
-Use empty strings for missing fields. Use empty arrays for missing array fields. Return ONLY the JSON object.
-
+Return ONLY a JSON object, no markdown fences, no commentary, in this exact shape:
 {
-  "name": "string",
-  "email": "string",
-  "phone": "string",
-  "location": "string",
-  "linkedin": "string",
-  "github": "string",
-  "website": "string (portfolio or personal website, empty string if none)",
+  "name": "string", "email": "string", "phone": "string", "location": "string",
+  "linkedin": "string", "github": "string", "website": "string",
   "summary": "string",
-  "experience": [
-    {
-      "title": "string",
-      "company": "string",
-      "location": "string",
-      "dates": "string",
-      "bullets": ["string"]
-    }
-  ],
-  "projects": [
-    {
-      "name": "string",
-      "description": "string",
-      "technologies": "string (comma-separated tech stack)",
-      "link": "string (project URL if mentioned, empty string if none)",
-      "dates": "string (time period if mentioned, empty string if none)",
-      "bullets": ["string"]
-    }
-  ],
-  "education": [
-    {
-      "degree": "string",
-      "school": "string",
-      "dates": "string",
-      "details": "string"
-    }
-  ],
-  "skills": [
-    { "category": "string", "items": "string (comma-separated)" }
-  ],
+  "experience": [{"title":"string","company":"string","location":"string","dates":"string","bullets":["string"]}],
+  "projects": [{"name":"string","description":"string","technologies":"comma-separated string","link":"string","dates":"string","bullets":["string"]}],
+  "education": [{"degree":"string","school":"string","dates":"string","details":"string"}],
+  "skills": [{"category":"string","items":"comma-separated string"}],
   "certifications": ["string"],
-  "languages": ["string (spoken/written languages, e.g. 'English (Native)', 'Spanish (Fluent)')"]
+  "languages": ["string, e.g. 'English (Native)'"]
 }
 
 Resume text:
 ${rawText}`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
-    const clean = text.replace(/^```json|^```|```$/gm, "").trim();
-    return JSON.parse(clean);
+    return this.generateJSON<StructuredResume>(prompt, {
+      thinkingLevel: ThinkingLevel.MINIMAL,
+      maxOutputTokens: 4096,
+    });
   }
 
   // Map improved content onto original DOCX text nodes
   async remapText<T>(originalTexts: string[], improvedContent: T): Promise<string[]> {
-    const model = genAI.getGenerativeModel({
-      model: this.model,
-      generationConfig: { responseMimeType: "application/json" },
-    });
-
     const prompt = `You are given two things:
 
 1. An ORDERED LIST of text snippets extracted from a resume DOCX file (these are all the text nodes in document order).
 2. IMPROVED resume content as structured JSON.
 
-Your job: return a JSON array of the same length as the text list.
+Return ONLY a JSON array of strings, same length and order as the input list (${originalTexts.length} items), no markdown fences, no commentary.
 For each index, write the improved version of that text snippet using the improved content.
 - Preserve structural/label texts exactly (e.g. "Experience", "Education", "Skills", section headers, dates).
 - Only replace actual content: names, bullet points, descriptions, contact info, summaries.
 - If a snippet is a label, divider, or formatting text, keep it unchanged.
 - Keep each replacement roughly the same length as the original.
-- Return ONLY a JSON array of strings, same length as input. No explanation.
 
 ORIGINAL TEXT NODES (${originalTexts.length} items):
 ${JSON.stringify(originalTexts, null, 2)}
@@ -404,207 +222,100 @@ ${JSON.stringify(originalTexts, null, 2)}
 IMPROVED CONTENT:
 ${JSON.stringify(improvedContent, null, 2)}`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
-    const clean = text.replace(/^```json|^```|```$/gm, "").trim();
-    const mapped: string[] = JSON.parse(clean);
+    const mapped = await this.generateJSON<string[]>(prompt, {
+      thinkingLevel: ThinkingLevel.MINIMAL,
+    });
 
-    if (!Array.isArray(mapped) || mapped.length !== originalTexts.length) {
+    if (mapped.length !== originalTexts.length) {
       throw new Error(
-        `Gemini returned ${mapped?.length} items but expected ${originalTexts.length}`
+        `Gemini returned ${mapped.length} items but expected ${originalTexts.length}`
       );
     }
     return mapped;
   }
 
-  // Build the prompt for resume polishing with all the analysis context
-  buildPolishPrompt(resumeContent: string, analysis: ResumePolishContext): string {
+  // Build the analysis prompt -- rules + compact schema description.
+  // Array sizes are capped to bound output tokens (and therefore latency).
+  private buildAnalysisPrompt(resumeContent: string): string {
+    return `
+You are a senior ATS resume analyst and career strategist. Precise, evidence-based, no generic padding.
+
+GROUND EVERYTHING IN THE RESUME. Every suggestion, keyword, flag, and upgrade must trace to something that actually exists in the resume text below.
+
+RULES:
+1. Only suggest skills/keywords with direct evidence in the resume. No evidence = no suggestion.
+2. Every keywordSuggestion needs an "evidenceFrom" field quoting the exact resume text that justifies it.
+3. Missing sections (skills, projects, certifications) are a missedOpportunity, not a redFlag or weakness, unless they break ATS parsing.
+4. Score honestly. If overallScore >= 85, weaknesses/grammarIssues should only contain real, significant issues. Empty arrays are valid and preferred over padding.
+5. "apply" is always false on every item.
+6. Be concise in every string value -- no filler words, no repeated phrasing.
+
+SCORING: atsScore, formattingScore, keywordScore, impactScore, clarityScore, creativityScore (0-100 each).
+overallScore = ATS(25%) + Impact(30%) + Keywords(20%) + Formatting(15%) + Clarity(10%).
+Grade: 95-100=A+, 90-94=A, 80-89=B+, 75-79=B, 65-74=C, 55-64=D, <55=F.
+
+CAPS (do not exceed): strengths/weaknesses/missedOpportunities max 5 each. grammarIssues max 5. impactUpgrades max 6. creativityBoosts max 5. keywordSuggestions max 8. formattingTips max 5. redFlags max 4.
+
+Return ONLY a JSON object, no markdown fences, no commentary, in this exact shape:
+{
+  "title": "candidateName - inferred Role",
+  "overallScore": 0, "atsScore": 0, "formattingScore": 0, "keywordScore": 0, "impactScore": 0, "clarityScore": 0, "creativityScore": 0,
+  "grade": "A+|A|B+|B|C|D|F",
+  "recruiterVerdict": "max 20 words, gut reaction after 6 seconds",
+  "overallFeedback": "string",
+  "strengths": ["string"], "weaknesses": ["string"], "missedOpportunities": ["string"],
+  "grammarIssues": [{"original":"exact quote","suggestion":"string","context":"string","severity":"minor|moderate|critical","apply":false}],
+  "impactUpgrades": [{"original":"exact quote","upgraded":"string","reason":"string","apply":false}],
+  "creativityBoosts": [{"original":"exact quote","suggestion":"string","context":"string","apply":false}],
+  "keywordSuggestions": [{"keyword":"string","reason":"string","evidenceFrom":"exact quote","apply":false}],
+  "formattingTips": [{"tip":"string","reason":"string","apply":false}],
+  "redFlags": [{"issue":"string","impact":"string","fix":"string","apply":false}],
+  "candidatePersona": {"archetype":"string","tone":"string","standoutFactor":"string","hiringRisk":"low|medium|high","hiringRiskReason":"string"}
+}
+
+Resume Content:
+${resumeContent}
+`;
+  }
+
+  // Build the prompt for resume polishing with all the analysis context.
+  private buildPolishPrompt(resumeContent: string, analysis: ResumePolishContext): string {
     const issuesContext = JSON.stringify(analysis, null, 2);
 
     return `
-You are an elite resume writer and ATS optimization expert. You have been given a raw resume and a detailed diagnostic analysis of everything wrong with it.
+You are an elite resume writer and ATS optimization expert. Rewrite this resume from scratch into an ATS-optimized, recruiter-captivating document that would score 90+ across all dimensions, fixing everything in the diagnostic analysis below.
 
-Your mission: rewrite this resume from scratch into a flawless, ATS-optimized, recruiter-captivating document that would score 90+ across all dimensions.
-
-Do not simply fix surface issues. Reconstruct, elevate, and sharpen every section.
-
----
-
-DIAGNOSTIC ANALYSIS (your instruction set — fix EVERYTHING flagged here):
-
+DIAGNOSTIC ANALYSIS (fix everything flagged here):
 ${issuesContext}
 
----
+RULES:
+- Never fabricate contact info, employers, degrees, dates, or certifications. Keep all real contact info exactly as provided.
+- Add a headline (5-10 words): role + value, punchy.
+- Summary: 3-4 sentences max, lead with role + experience + top strengths, inject 3-5 relevant keywords naturally.
+- Experience bullets: [Action Verb] + [Scope] + [Quantified Result]. Apply all impactUpgrades and grammarIssues fixes, eliminate all creativityBoosts clichés. 3-5 bullets per role, 12-30 words each. Add one keyAchievement per role. Consistent tense (past for past roles, present for current).
+- Projects: 1-sentence description + 2-4 impact bullets + an "impact" field + comma-separated technologies.
+- Education: add highlights[] only for GPA >= 3.5, honors, awards, relevant coursework -- don't fabricate.
+- Skills: reorganize into clean categories (Languages, Frameworks, Tools, Databases, Cloud/DevOps, Soft Skills), inject applicable missing keywords, drop redundant ones.
+- Certifications/languages: preserve real ones only, never invent.
+- additionalSections: include volunteer work / publications / awards / speaking only if present in the original -- never fabricate.
+- If a field has no data in the original, use "" or [] -- never invent it.
+- polishSummary is required: changesApplied (max 8), scoreImprovementAreas (max 5), atsKeywordsInjected (max 10), estimatedNewScore (0-100, honest).
 
-REWRITING RULES:
-
-**Identity & Contact**
-- Keep all real contact info exactly as provided. Never fabricate email, phone, or links.
-- Add a punchy professional headline (5–10 words) that instantly communicates role + value.
-
-**Summary**
-- Rewrite as 3–4 sentences max. Lead with role + years of experience + top strengths.
-- Inject 3–5 ATS keywords from keywordSuggestions naturally.
-- End with what the candidate brings to the table — make it specific, not generic.
-
-**Experience — Every bullet must follow this formula:**
-  [Strong Action Verb] + [Specific Task/Scope] + [Quantified Result or Business Impact]
-- Apply ALL impactUpgrades from the analysis.
-- Fix ALL grammarIssues (especially "critical" and "moderate" severity).
-- Apply creativityBoosts — eliminate every cliché flagged in the analysis.
-- Every role must have 3–5 bullets. No bullet under 12 words. No bullet over 30 words.
-- Add a keyAchievement field — the single most impressive thing from that role (1 line, bold-worthy).
-- Use consistent past tense for past roles, present tense for current role.
-
-**Projects**
-- Each project must have a crisp 1-sentence description + 2–4 impact-driven bullets.
-- Add an "impact" field summarizing the real-world value or technical challenge overcome.
-- Include technologies as a clean comma-separated list.
-
-**Education**
-- Add highlights[] for any GPA ≥ 3.5, honors, awards, or relevant coursework.
-- Do not fabricate academic credentials.
-
-**Skills**
-- Reorganize into clean categories: Languages, Frameworks, Tools, Databases, Cloud/DevOps, Soft Skills.
-- Inject missing keywords from keywordSuggestions where genuinely applicable.
-- Remove redundant or outdated skills.
-
-**Certifications & Languages**
-- Preserve all real certifications. Do not invent new ones.
-- Add languages only if present in original resume.
-
-**Additional Sections**
-- If the original resume has volunteer work, publications, awards, or speaking engagements — include them under additionalSections.
-- Do not fabricate entries.
-
-**Polish Summary (REQUIRED)**
-- List every significant change made (changesApplied).
-- List the areas that will most improve the score (scoreImprovementAreas).
-- List every ATS keyword you injected (atsKeywordsInjected).
-- Provide an honest estimated new overall score (estimatedNewScore, 0–100).
-
----
-
-ABSOLUTE RULES:
-- Never fabricate contact info, employers, degrees, dates, or certifications.
-- Never add skills the candidate didn't demonstrate.
-- You MAY rephrase, restructure, quantify (with reasonable inference), and elevate language.
-- If a metric is missing but can be reasonably inferred (e.g., team size, project scale), use conservative estimates and frame them accurately.
-- Every section must be tighter, stronger, and more specific than the original.
-
----
-
-MISSING DATA RULES:
-- If a field's data does not exist in the original resume, set it to null (for strings/objects) or [] (for arrays).
-- NEVER invent, guess, or fabricate missing contact info, links, employers, dates, or certifications.
-- Optional fields (website, keyAchievement, impact, highlights, additionalSections) should be omitted entirely (undefined) if not present.
-- Required fields (name, email, summary, etc.) that are genuinely absent: set to "".
-
----
-
-OUTPUT INTEGRITY RULES:
-
-1. Return ONLY valid JSON. The response MUST start with { and end with }. No exceptions.
-
-2. Never wrap the response in markdown, code blocks, or backticks (no \`\`\`json or \`\`\`).
-
-3. Never output undefined as a value. Use null for absent optional fields, [] for absent arrays.
-
-4. String values must be clean, single strings only:
-   - Never embed unescaped double quotes inside a string value.
-   - Never write multiple options or alternatives inside a single string (e.g. "Option A" or "Option B...").
-   - Never write prose, explanations, or commentary inside a string value.
-   - If presenting a suggestion or upgrade, pick ONE best option and write it as a clean string.
-
-5. Never truncate the response. Every array and object must be fully closed.
-
-6. Every string must be properly escaped:
-   - Double quotes inside strings → \\\"
-   - Newlines inside strings → \\n
-   - Backslashes inside strings → \\\\
-
-7. Arrays must never be left open. If a section has no items, return [] not a partial array.
-
-8. Do not add comments inside JSON (no // or /* */).
-
-9. Do not add trailing commas after the last item in any array or object.
-
-10. Every field in the schema is required. Do not skip or rename fields.
-
----
-
-SCHEMA:
-
+Return ONLY a JSON object, no markdown fences, no commentary, in this exact shape:
 {
-  "name": string,
-  "email": string,
-  "phone": string,
-  "location": string,
-  "linkedin": string,
-  "github": string,
-  "website": string | undefined,
-  "headline": string,
-  "summary": string,
-  "experience": [
-    {
-      "title": string,
-      "company": string,
-      "location": string,
-      "dates": string,
-      "bullets": string[],
-      "keyAchievement": string | undefined
-    }
-  ],
-  "projects": [
-    {
-      "name": string,
-      "description": string,
-      "technologies": string,
-      "link": string | undefined,
-      "dates": string | undefined,
-      "bullets": string[],
-      "impact": string | undefined
-    }
-  ],
-  "education": [
-    {
-      "degree": string,
-      "school": string,
-      "dates": string,
-      "details": string,
-      "highlights": string[] | undefined
-    }
-  ],
-  "skills": [
-    {
-      "category": string,
-      "items": string
-    }
-  ],
-  "certifications": string[],
-  "languages": string[] | undefined,
-  "additionalSections": [
-    {
-      "title": string,
-      "entries": [
-        {
-          "label": string,
-          "description": string,
-          "date": string | undefined
-        }
-      ]
-    }
-  ] | undefined,
-  "polishSummary": {
-    "changesApplied": string[],
-    "scoreImprovementAreas": string[],
-    "atsKeywordsInjected": string[],
-    "estimatedNewScore": number
-  }
+  "name": "string", "email": "string", "phone": "string", "location": "string",
+  "linkedin": "string", "github": "string", "website": "string",
+  "headline": "string",
+  "summary": "string",
+  "experience": [{"title":"string","company":"string","location":"string","dates":"string","bullets":["string"],"keyAchievement":"string"}],
+  "projects": [{"name":"string","description":"string","technologies":"comma-separated string","link":"string","dates":"string","bullets":["string"],"impact":"string"}],
+  "education": [{"degree":"string","school":"string","dates":"string","details":"string","highlights":["string"]}],
+  "skills": [{"category":"string","items":"comma-separated string"}],
+  "certifications": ["string"],
+  "languages": ["string"],
+  "additionalSections": [{"title":"string","entries":[{"label":"string","description":"string","date":"string"}]}],
+  "polishSummary": {"changesApplied":["string"],"scoreImprovementAreas":["string"],"atsKeywordsInjected":["string"],"estimatedNewScore":0}
 }
-
----
 
 Resume Content (original, unpolished):
 ${resumeContent}
