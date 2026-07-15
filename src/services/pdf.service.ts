@@ -77,7 +77,7 @@ export class PdfService {
 
     async renderToBuffer(
         data: Partial<StructuredResume>,
-        templateName: string = "classic"
+        templateName: string = "temp1"
     ): Promise<Buffer> {
         const compile = this.loadTemplate(templateName);
         const faPath = await this.getLocalFAPath();
@@ -96,7 +96,6 @@ export class PdfService {
             const pdf = await page.pdf({
                 format: "A4",
                 printBackground: true,
-                margin: { top: "0", right: "0", bottom: "0", left: "0" },
             });
 
             return Buffer.from(pdf);
@@ -109,7 +108,7 @@ export class PdfService {
 
     async renderToFile(
         data: StructuredResume,
-        templateName: string = "classic",
+        templateName: string = "temp1",
         outputPath: string = path.resolve(process.cwd(), "output.pdf")
     ): Promise<string> {
         const buffer = await this.renderToBuffer(data, templateName);

@@ -2,38 +2,10 @@ import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { StructuredResume } from "../types/structuredResume.types";
 import { ResumeAnalysis, ResumePolishContext } from "../types/ResumeAnalysis";
 import { ChatResponse } from "../types/Responses";
+import { HTTPRequest } from "puppeteer";
+import { HttpStatus } from "../utils/HttpStatus";
+import { ApiError } from "../utils/ApiError";
 
-/* ------------------------------------------------------------------------
- * v2 of this file: dropped zod (schema-to-JSON-Schema conversion was
- * throwing errors against Gemini's limited JSON Schema subset). Back to
- * describing the shape in the prompt, forcing JSON mode via
- * responseMimeType, and parsing directly -- but with real latency fixes
- * this time, not just the model swap:
- *
- * - Model: gemini-3.1-flash-lite (was gemma-4-31b-it -- a dense,
- *   thinking-capable open model, almost certainly the root cause of the
- *   original 61s/92s latencies).
- * - Singleton bug fixed: getInstance() takes no model arg -- model
- *   selection lives inside each method. Update any
- *   GeminiService.getInstance("...") call sites elsewhere to drop the arg.
- * - thinkingLevel explicit per call: "minimal" for pure extraction
- *   (parseResume, remapText, testModel), "low" for judgment-heavy calls
- *   (analyzeResume, generateImprovedContent).
- * - Array sizes are capped in the prompt (e.g. grammarIssues max 5) --
- *   output token count is the actual latency driver, so bounding
- *   "find every issue" style instructions gives a real, predictable
- *   ceiling instead of unbounded generation.
- * - maxOutputTokens set as a hard backstop per call.
- * - "apply" is force-set to false in code after parsing, on every
- *   suggestion array -- cheap, reliable replacement for schema-level
- *   enforcement.
- * - Unified onto @google/genai; the legacy @google/generative-ai client is
- *   gone from this file.
- *
- * NOT changed: generateImprovedContent still returns a full resume rewrite
- * rather than a patch of only approved suggestions -- that needs changes
- * in remapText's caller / DOCX-mapping code outside this file.
- * ---------------------------------------------------------------------- */
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY!,
@@ -45,6 +17,7 @@ const MODELS = {
   DEFAULT: "gemini-3.1-flash-lite",
 } as const;
 
+const NUMBER_OF_RETRIES = 3; // Number of retries for transient errors
 export class GeminiService {
   private static instance: GeminiService;
 
@@ -57,13 +30,6 @@ export class GeminiService {
 
   private constructor() { }
 
-  /**
-   * Shared call path for every Gemini request in this service.
-   * Forces JSON mode, applies a thinking level + output token cap, and
-   * parses the result. No schema validation library -- the prompt
-   * describes the shape; callers should treat the result defensively
-   * (see normalizeApplyFalse below for one example).
-   */
   private async generateJSON<T>(
     prompt: string,
     opts: { model?: string; thinkingLevel?: ThinkingLevel; maxOutputTokens?: number } = {}
@@ -84,9 +50,7 @@ export class GeminiService {
     try {
       return JSON.parse(raw) as T;
     } catch {
-      throw new Error(
-        `Gemini did not return valid JSON (model: ${model}). First 300 chars:\n${raw.slice(0, 300)}`
-      );
+      return null as T;
     }
   }
 
@@ -158,12 +122,19 @@ Context: ${context}`;
   async generateImprovedContent(
     resumeContent: string,
     suggestions: ResumePolishContext
-  ): Promise<StructuredResume> {
+  ): Promise<StructuredResume | null> {
     const prompt = this.buildPolishPrompt(resumeContent, suggestions);
-    return this.generateJSON<StructuredResume>(prompt, {
-      thinkingLevel: ThinkingLevel.LOW,
-      maxOutputTokens: 8192,
-    });
+
+    for (let i = 0; i < NUMBER_OF_RETRIES; i++) {
+      const result = await this.generateJSON<StructuredResume | null>(prompt, {
+        thinkingLevel: ThinkingLevel.LOW,
+      });
+      if (result) {
+        return result;
+      }
+      console.log(`Retrying Gemini request (${i + 1}/${NUMBER_OF_RETRIES}) due to null response...`);
+    }
+    return null;
   }
 
   // Analyze resume and return detailed feedback and suggestions
@@ -171,7 +142,6 @@ Context: ${context}`;
     const prompt = this.buildAnalysisPrompt(resumeContent);
     const result = await this.generateJSON<ResumeAnalysis>(prompt, {
       thinkingLevel: ThinkingLevel.LOW,
-      maxOutputTokens: 4096,
     });
     return this.normalizeApplyFalse(result);
   }
@@ -303,18 +273,18 @@ RULES:
 
 Return ONLY a JSON object, no markdown fences, no commentary, in this exact shape:
 {
-  "name": "string", "email": "string", "phone": "string", "location": "string",
-  "linkedin": "string", "github": "string", "website": "string",
-  "headline": "string",
-  "summary": "string",
-  "experience": [{"title":"string","company":"string","location":"string","dates":"string","bullets":["string"],"keyAchievement":"string"}],
-  "projects": [{"name":"string","description":"string","technologies":"comma-separated string","link":"string","dates":"string","bullets":["string"],"impact":"string"}],
-  "education": [{"degree":"string","school":"string","dates":"string","details":"string","highlights":["string"]}],
-  "skills": [{"category":"string","items":"comma-separated string"}],
-  "certifications": ["string"],
-  "languages": ["string"],
-  "additionalSections": [{"title":"string","entries":[{"label":"string","description":"string","date":"string"}]}],
-  "polishSummary": {"changesApplied":["string"],"scoreImprovementAreas":["string"],"atsKeywordsInjected":["string"],"estimatedNewScore":0}
+"name": "string", "email": "string", "phone": "string", "location": "string",
+"linkedin": "string", "github": "string", "website": "string", "profileImage": "string",
+"headline": "string",
+"summary": "string",
+"experience": [{"title":"string","company":"string","location":"string","dates":"string","bullets":["string"],"keyAchievement":"string"}],
+"projects": [{"name":"string","description":"string","technologies":"comma-separated string","link":"string","dates":"string","bullets":["string"],"impact":"string"}],
+"education": [{"degree":"string","school":"string","dates":"string","details":"string","highlights":["string"]}],
+"skills": [{"category":"string","items":"comma-separated string"}],
+"certifications": ["string"],
+"languages": ["string"],
+"additionalSections": [{"title":"string","entries":[{"label":"string","description":"string","date":"string"}]}],
+"polishSummary": {"changesApplied":["string"],"scoreImprovementAreas":["string"],"atsKeywordsInjected":["string"],"estimatedNewScore":0}
 }
 
 Resume Content (original, unpolished):
