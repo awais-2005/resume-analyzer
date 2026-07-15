@@ -7,8 +7,8 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc -p .",
+    "postinstall": "npx puppeteer browsers install chrome",
     "start": "node dist/server.js",
     "dev": "nodemon src/server.ts"
   },
