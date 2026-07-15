@@ -228,9 +228,7 @@ export class ResumeController {
 			throw new ApiError(HttpStatus.BAD_REQUEST, "No valid analysis provided");
 		}
 
-		const { ...parsedAnalysis } = parsedAnalysisWithOtherDetails;
-		const historyId = this.getHistoryId(parsedAnalysisWithOtherDetails);
-		const resumeContent = this.getResumeContent(parsedAnalysisWithOtherDetails);
+		const { historyId, resumeContent, ...parsedAnalysis } = parsedAnalysisWithOtherDetails;
 
 		if (!historyId || typeof historyId !== "string") {
 			throw new ApiError(HttpStatus.BAD_REQUEST, "Invalid history ID provided");
@@ -247,9 +245,15 @@ export class ResumeController {
 		const polishContext = timer.stepSync("extract approved suggestions", () =>
 			geminiService.extractApprovedSuggestions(parsedAnalysis)
 		);
-		const { polishSummary, ...structuredData } = await timer.step("LLM (generateImprovedContent)", () =>
+		const structuredResult = await timer.step("LLM (generateImprovedContent)", () =>
 			geminiService.generateImprovedContent(resumeContent, polishContext)
 		);
+
+		if (!structuredResult) {
+			throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to generate improved resume content");
+		}
+
+		const { polishSummary, ...structuredData } = structuredResult;
 
 		const pdfBuffer = await timer.step("PDF render (Puppeteer)", () =>
 			pdfService.renderToBuffer(structuredData, templateId)

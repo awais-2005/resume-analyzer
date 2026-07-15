@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { PdfService } from "../services/pdf.service";
-import { mockResume } from '../tests/mockData.test';
+import { structuredResumeExample } from '../tests/mockData.test';
 import { HttpStatus } from "../utils/HttpStatus";
 import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
@@ -64,7 +64,7 @@ export class Test {
 
     async pdfGenerationTest(req: Request, res: Response): Promise<void> {
         try {
-            const buffer = await pdfService.renderToBuffer(mockResume, "classic");
+            const buffer = await pdfService.renderToBuffer(structuredResumeExample, "classic");
             res.status(200).send(new ApiResponse<Buffer<ArrayBufferLike>>(true, buffer, "Resume has been created successfully!"))
         } catch (err) {
             const message: string = err instanceof Error ? err.message : typeof err === "string" ? err : `UNKNOWN TYPE OF ERROR: ${err}`;
